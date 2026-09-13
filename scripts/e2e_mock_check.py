@@ -122,8 +122,14 @@ def main():
     ok &= check("one line stored", len(lines) == 1, repr(lines))
     if lines:
         stored = json.loads(lines[0])
-        ok &= check("exactly four fields", sorted(stored) == ["chinese", "eli5", "ipa", "word"], str(sorted(stored)))
+        schema = ["chinese", "created_at", "eli5", "id", "ipa", "normalized", "source", "word"]
+        ok &= check("exactly the documented fields", sorted(stored) == schema, str(sorted(stored)))
         ok &= check("stored word is normalized", stored["word"] == "serendipity", stored.get("word", ""))
+        ok &= check("normalized key is present", stored.get("normalized") == "serendipity", stored.get("normalized", ""))
+        ok &= check("an id was assigned", bool(stored.get("id")), repr(stored.get("id")))
+        ok &= check("source defaults to cli", stored.get("source") == "cli", repr(stored.get("source")))
+        ok &= check("created_at was recorded", bool(stored.get("created_at")), repr(stored.get("created_at")))
+    first_id = json.loads(lines[0])["id"] if lines else None
 
     print("scenario 2: the second lookup is served from cache, with no network")
     MockAPI.calls = 0
@@ -155,6 +161,55 @@ def main():
     dead = run_love(binary, ["serendipity"], {**env, "DEEPSEEK_BASE_URL": "http://127.0.0.1:9/v1", "EWH_CACHE": str(dead_cache)})
     ok &= check("exit code 3", dead.returncode == 3, f"exit={dead.returncode}")
     ok &= check("nothing written", not dead_cache.exists())
+
+    print("scenario 6: a legacy four-field file is upgraded in place")
+    legacy = tmp / "legacy.jsonl"
+    legacy_body = (
+        '{"word":"evil","ipa":"/\\u02c8i\\u02d0v\\u0259l/","eli5":"Very, very bad.","chinese":"\\u90aa\\u6076\\u7684"}\n'
+        '{"word":"sign","ipa":"/sa\\u026an/","eli5":"A sign.","chinese":"\\u6807\\u5fd7"}\n'
+    )
+    legacy.write_text(legacy_body, encoding="utf-8")
+    MockAPI.calls = 0
+
+    migrated = run_love(binary, ["EVIL"], {**env, "EWH_CACHE": str(legacy)})
+    ok &= check("exit code 0", migrated.returncode == 0, migrated.stderr)
+    ok &= check("served from the legacy record", "Very, very bad." in migrated.stdout, repr(migrated.stdout))
+    ok &= check("no network was needed", MockAPI.calls == 0, f"{MockAPI.calls} calls")
+    ok &= check("upgrade was announced", "upgraded" in migrated.stderr, repr(migrated.stderr))
+
+    upgraded = [json.loads(l) for l in legacy.read_text(encoding="utf-8").splitlines() if l.strip()]
+    ok &= check("both words survived", len(upgraded) == 2, str(len(upgraded)))
+    ok &= check(
+        "every original field was preserved",
+        upgraded[0]["word"] == "evil"
+        and upgraded[0]["eli5"] == "Very, very bad."
+        and upgraded[0]["chinese"] == "\u90aa\u6076\u7684"
+        and upgraded[1]["chinese"] == "\u6807\u5fd7",
+        str(upgraded),
+    )
+    ok &= check(
+        "new fields were added",
+        all(all(row.get(f) for f in ("id", "normalized", "source", "created_at")) for row in upgraded),
+        str(upgraded),
+    )
+    ok &= check("ids are unique", len({row["id"] for row in upgraded}) == 2, str([r["id"] for r in upgraded]))
+    ok &= check("a backup was kept", len(list(tmp.glob("legacy.jsonl.bak-*"))) == 1)
+
+    print("scenario 7: a damaged file is never silently rewritten")
+    damaged = tmp / "damaged.jsonl"
+    damaged_body = (
+        '{"word":"evil","ipa":"/x/","eli5":"Very, very bad.","chinese":"\\u90aa\\u6076\\u7684"}\n'
+        "this line is not json at all\n"
+    )
+    damaged.write_text(damaged_body, encoding="utf-8")
+    MockAPI.calls = 0
+
+    survived = run_love(binary, ["evil"], {**env, "EWH_CACHE": str(damaged)})
+    ok &= check("exit code 0", survived.returncode == 0, survived.stderr)
+    ok &= check("the damaged line was reported", "skipping invalid JSON" in survived.stderr, repr(survived.stderr))
+    ok &= check("the healthy record still works", "Very, very bad." in survived.stdout, repr(survived.stdout))
+    ok &= check("the file was left untouched", damaged.read_text(encoding="utf-8") == damaged_body)
+    ok &= check("no backup was made", len(list(tmp.glob("damaged.jsonl.bak-*"))) == 0)
 
     srv.shutdown()
     print()

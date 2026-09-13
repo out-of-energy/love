@@ -23,9 +23,10 @@ import (
 
 // Paths locates the files that make up a store.
 type Paths struct {
-	Words   string
-	Reviews string
-	Memory  string
+	Words     string
+	Reviews   string
+	Memory    string
+	Generated string
 }
 
 // DefaultPaths returns the conventional locations under the user's home
@@ -41,9 +42,10 @@ func DefaultPaths() (Paths, error) {
 // PathsIn returns the store layout rooted at dir.
 func PathsIn(dir string) Paths {
 	return Paths{
-		Words:   filepath.Join(dir, "words.jsonl"),
-		Reviews: filepath.Join(dir, "reviews.jsonl"),
-		Memory:  filepath.Join(dir, "memory.json"),
+		Words:     filepath.Join(dir, "words.jsonl"),
+		Reviews:   filepath.Join(dir, "reviews.jsonl"),
+		Memory:    filepath.Join(dir, "memory.json"),
+		Generated: filepath.Join(dir, "generated.jsonl"),
 	}
 }
 

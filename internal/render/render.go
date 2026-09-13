@@ -4,18 +4,7 @@ package render
 import (
 	"fmt"
 	"io"
-	"os"
 )
-
-// IsTerminal reports whether f is an interactive terminal. Color is only used
-// when a person is actually looking at the output.
-func IsTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
-}
 
 // Record writes the fixed three-part block:
 //

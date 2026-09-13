@@ -6,26 +6,156 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/out-of-energy/love/internal/memory"
+	"github.com/out-of-energy/love/internal/storage"
 )
+
+// ---------------------------------------------------------------------------
+// Guards on the grammar.
+//
+// These tests are what make the action registry safe to extend. `love <word>`
+// accepts any word at all, and words are an open set, so an action may only be
+// reachable through something that cannot be a word. Each invariant below
+// exists because breaking it silently removes a word from the dictionary.
+// ---------------------------------------------------------------------------
+
+func TestEveryRegisteredActionIsReachable(t *testing.T) {
+	for _, a := range actions {
+		for _, flag := range a.flags {
+			var out, errOut bytes.Buffer
+			cmd, done, code := parseArgs([]string{flag}, &out, &errOut)
+			if done || code != exitOK {
+				t.Errorf("%s: done=%v code=%d stderr=%s", flag, done, code, errOut.String())
+				continue
+			}
+			if cmd.action == nil || cmd.action.name != a.name {
+				t.Errorf("%s did not resolve to action %q", flag, a.name)
+			}
+		}
+	}
+}
+
+// The invariant the whole design rests on. A flag that did not begin with "-"
+// would be consumed by the word branch first, so the action would be silently
+// unreachable — and every word equal to that flag would become unlookupable.
+func TestActionFlagsCannotBeConfusedWithWords(t *testing.T) {
+	for _, a := range actions {
+		if len(a.flags) == 0 {
+			t.Errorf("action %q has no flag, so it can never be reached", a.name)
+		}
+		for _, flag := range a.flags {
+			if !strings.HasPrefix(flag, "-") {
+				t.Errorf("action %q uses %q, which the word branch would swallow", a.name, flag)
+			}
+		}
+	}
+}
+
+func TestActionFlagsAndNamesAreUnique(t *testing.T) {
+	flagOwner := map[string]string{}
+	names := map[string]bool{}
+
+	for _, a := range actions {
+		if names[a.name] {
+			t.Errorf("action %q is registered more than once", a.name)
+		}
+		names[a.name] = true
+
+		for _, flag := range a.flags {
+			if owner, taken := flagOwner[flag]; taken {
+				t.Errorf("flag %q is claimed by both %q and %q", flag, owner, a.name)
+			}
+			flagOwner[flag] = a.name
+		}
+	}
+}
+
+// The concrete regression this design exists to prevent. Every one of these was
+// a planned subcommand name, and each must remain an ordinary lookup.
+func TestWordsThatLookLikeCommandNamesStillResolveToLookup(t *testing.T) {
+	for _, word := range []string{"review", "daily", "stats", "export", "add", "import", "rm", "list"} {
+		var out, errOut bytes.Buffer
+		cmd, done, code := parseArgs([]string{word}, &out, &errOut)
+		if done {
+			t.Errorf("%q terminated early with code %d: %s", word, code, errOut.String())
+			continue
+		}
+		if cmd.action != nil {
+			t.Errorf("%q resolved to action %q instead of a lookup", word, cmd.action.name)
+			continue
+		}
+		if cmd.word != word {
+			t.Errorf("%q resolved to word %q", word, cmd.word)
+		}
+	}
+}
+
+func TestActionRejectsAWordArgument(t *testing.T) {
+	var out, errOut bytes.Buffer
+	_, done, code := parseArgs([]string{"--review", "maintain"}, &out, &errOut)
+	if !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+	if !strings.Contains(errOut.String(), "不接受单词参数") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestTwoActionsAtOnceIsAUsageError(t *testing.T) {
+	if len(actions) < 2 {
+		t.Skip("needs at least two registered actions")
+	}
+	var out, errOut bytes.Buffer
+	args := []string{actions[0].flags[0], actions[1].flags[0]}
+	if _, done, code := parseArgs(args, &out, &errOut); !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+}
+
+func TestUnknownOptionListsTheAvailableActions(t *testing.T) {
+	var out, errOut bytes.Buffer
+	_, done, code := parseArgs([]string{"--nope"}, &out, &errOut)
+	if !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+	if !strings.Contains(errOut.String(), "unknown option") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+	for _, a := range actions {
+		if !strings.Contains(errOut.String(), a.flags[0]) {
+			t.Errorf("the error should list %s, got %q", a.flags[0], errOut.String())
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lookup behaviour.
+// ---------------------------------------------------------------------------
+
+func writeWords(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRunServesACacheHitWithoutAnAPIKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "words.jsonl")
-	line := `{"word":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的"}` + "\n"
-	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeWords(t, path, `{"word":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的"}`+"\n")
 	t.Setenv("EWH_CACHE", path)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"EVIL"}, &stdout, &stderr); code != exitOK {
+	if code := run([]string{"EVIL"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Very, very bad.") {
+	if !strings.Contains(stdout.String(), "Very, very bad.") || !strings.Contains(stdout.String(), "邪恶的") {
 		t.Errorf("stdout = %q", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "邪恶的") {
-		t.Errorf("stdout should carry the Chinese meaning: %q", stdout.String())
 	}
 }
 
@@ -34,7 +164,7 @@ func TestRunNeedsAKeyOnACacheMiss(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"serendipity"}, &stdout, &stderr); code != exitUsage {
+	if code := run([]string{"serendipity"}, strings.NewReader(""), &stdout, &stderr); code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(stderr.String(), "DEEPSEEK_API_KEY") {
@@ -47,7 +177,7 @@ func TestRunNeedsAKeyOnACacheMiss(t *testing.T) {
 
 func TestRunRejectsEmptyInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != exitUsage {
+	if code := run(nil, strings.NewReader(""), &stdout, &stderr); code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(stderr.String(), "Usage: love <word>") {
@@ -57,16 +187,12 @@ func TestRunRejectsEmptyInput(t *testing.T) {
 
 func TestRunReportsDamagedLinesButStillServesHits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "words.jsonl")
-	content := "not json\n" +
-		`{"word":"sign","ipa":"/saɪn/","eli5":"A sign.","chinese":"标志"}` + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeWords(t, path, "not json\n"+`{"word":"sign","ipa":"/saɪn/","eli5":"A sign.","chinese":"标志"}`+"\n")
 	t.Setenv("EWH_CACHE", path)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"sign"}, &stdout, &stderr); code != exitOK {
+	if code := run([]string{"sign"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit = %d, want %d", code, exitOK)
 	}
 	if !strings.Contains(stderr.String(), "skipping invalid JSON") {
@@ -78,46 +204,134 @@ func TestRunReportsDamagedLinesButStillServesHits(t *testing.T) {
 }
 
 func TestParseArgsJoinsPhraseWords(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	word, done, code := parseArgs([]string{"Ice", "Cream"}, &stdout, &stderr)
+	var out, errOut bytes.Buffer
+	cmd, done, code := parseArgs([]string{"Ice", "Cream"}, &out, &errOut)
 	if done || code != exitOK {
 		t.Fatalf("done = %v, code = %d", done, code)
 	}
-	if word != "ice cream" {
-		t.Errorf("word = %q, want %q", word, "ice cream")
+	if cmd.word != "ice cream" {
+		t.Errorf("word = %q, want %q", cmd.word, "ice cream")
+	}
+	if cmd.action != nil {
+		t.Errorf("a phrase must not resolve to an action")
 	}
 }
 
 func TestParseArgsHelpAndVersion(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
-		var stdout, stderr bytes.Buffer
-		_, done, code := parseArgs(args, &stdout, &stderr)
+		var out, errOut bytes.Buffer
+		_, done, code := parseArgs(args, &out, &errOut)
 		if !done || code != exitOK {
 			t.Errorf("%v: done = %v, code = %d", args, done, code)
 		}
-		if !strings.Contains(stdout.String(), "Usage:") {
+		if !strings.Contains(out.String(), "Usage:") {
 			t.Errorf("%v: help text missing", args)
 		}
 	}
 	for _, args := range [][]string{{"--version"}, {"-V"}, {"version"}} {
-		var stdout, stderr bytes.Buffer
-		_, done, code := parseArgs(args, &stdout, &stderr)
+		var out, errOut bytes.Buffer
+		_, done, code := parseArgs(args, &out, &errOut)
 		if !done || code != exitOK {
 			t.Errorf("%v: done = %v, code = %d", args, done, code)
 		}
-		if !strings.Contains(stdout.String(), version) {
-			t.Errorf("%v: version missing from %q", args, stdout.String())
+		if !strings.Contains(out.String(), version) {
+			t.Errorf("%v: version missing from %q", args, out.String())
 		}
 	}
 }
 
-func TestParseArgsRejectsUnknownFlags(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	_, done, code := parseArgs([]string{"--nope"}, &stdout, &stderr)
-	if !done || code != exitUsage {
-		t.Fatalf("done = %v, code = %d", done, code)
+// The help text is the only place the grammar is explained, so it has to name
+// both halves of it.
+func TestHelpDocumentsBothWordsAndActions(t *testing.T) {
+	var out bytes.Buffer
+	printHelp(&out)
+	help := out.String()
+
+	for _, want := range []string{"love <word>", "Actions:", "--review"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help does not mention %q", want)
+		}
 	}
-	if !strings.Contains(stderr.String(), "unknown option") {
-		t.Errorf("stderr = %q", stderr.String())
+}
+
+// A review session cannot run without a terminal to type into.
+func TestReviewRefusesToRunNonInteractively(t *testing.T) {
+	t.Setenv("EWH_CACHE", filepath.Join(t.TempDir(), "words.jsonl"))
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--review"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "终端") {
+		t.Errorf("stderr should explain that a terminal is required: %q", stderr.String())
+	}
+}
+
+// The persistence path is the part that decides whether an evening's work
+// survives, and it is deliberately separated from the interactive loop so it can
+// be tested without a terminal.
+func TestGradingIsPersistedAsAnEventAndACache(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"maintain","normalized":"maintain",`+
+		`"ipa":"/meɪnˈteɪn/","eli5":"To keep something working well.","chinese":"维护",`+
+		`"source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+
+	cfg := config{paths: paths}
+	ports, err := buildReviewPorts(cfg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ports.Plan.Total() != 1 || len(ports.Plan.New) != 1 {
+		t.Fatalf("plan = %+v, want the one unstudied word", ports.Plan)
+	}
+	if ports.Expansion("a1") != nil {
+		t.Error("no expansion was cached, so none should be offered")
+	}
+
+	if _, err := ports.Grade("a1", memory.State{}, memory.Again); err != nil {
+		t.Fatalf("grading failed: %v", err)
+	}
+
+	// The event log is the source of truth and must contain the grading.
+	events, _, err := storage.OpenReviews(paths.Reviews).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].WordID != "a1" || events[0].BeforeBox != 0 || events[0].AfterBox != 1 {
+		t.Errorf("event = %+v, want a first exposure landing in box 1", events[0])
+	}
+
+	// The cache must exist, agree, and not be stale — otherwise every run would
+	// rebuild it forever.
+	cache, err := storage.LoadMemory(paths.Memory)
+	if err != nil {
+		t.Fatalf("the state cache was not written: %v", err)
+	}
+	states, err := cache.States()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states["a1"].Box != 1 {
+		t.Errorf("cached box = %d, want 1", states["a1"].Box)
+	}
+	current, err := storage.Fingerprint(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cache.Stale(current) {
+		t.Error("the cache written after grading is immediately stale")
+	}
+
+	// A second session must now see the word as already started, not new.
+	again, err := buildReviewPorts(cfg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Plan.New) != 0 {
+		t.Errorf("the graded word is still being offered as new: %+v", again.Plan)
 	}
 }

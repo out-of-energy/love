@@ -77,7 +77,11 @@ def resolve_binary():
 
 
 def run_love(binary, args, env):
-    return subprocess.run([binary, *args], capture_output=True, text=True, env=env)
+    # stdin is closed off rather than inherited: a test must never be able to
+    # hang waiting for input, and an interactive path must fail loudly instead.
+    return subprocess.run(
+        [binary, *args], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
+    )
 
 
 def check(label, condition, detail=""):
@@ -210,6 +214,47 @@ def main():
     ok &= check("the healthy record still works", "Very, very bad." in survived.stdout, repr(survived.stdout))
     ok &= check("the file was left untouched", damaged.read_text(encoding="utf-8") == damaged_body)
     ok &= check("no backup was made", len(list(tmp.glob("damaged.jsonl.bak-*"))) == 0)
+
+    print("scenario 8: a word that names an action is still looked up")
+    grammar_cache = tmp / "grammar.jsonl"
+    grammar_cache.write_text(
+        '{"id":"g1","word":"review","normalized":"review","ipa":"/rɪˈvjuː/",'
+        '"eli5":"To look at something again.","chinese":"\\u590d\\u4e60",'
+        '"source":"cli","created_at":"2026-09-13T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    MockAPI.calls = 0
+    as_word = run_love(binary, ["review"], {**env, "EWH_CACHE": str(grammar_cache)})
+    ok &= check("exit code 0", as_word.returncode == 0, as_word.stderr)
+    ok &= check(
+        "a word named like an action is looked up as a word",
+        "To look at something again." in as_word.stdout,
+        repr(as_word.stdout),
+    )
+    ok &= check("no network was needed", MockAPI.calls == 0, f"{MockAPI.calls} calls")
+
+    print("scenario 9: the action flag never falls through to a lookup")
+    as_action = run_love(binary, ["--review"], {**env, "EWH_CACHE": str(grammar_cache)})
+    ok &= check("exit code 2", as_action.returncode == 2, f"exit={as_action.returncode}")
+    ok &= check(
+        "it explains that a terminal is required",
+        "\u7ec8\u7aef" in as_action.stderr,
+        repr(as_action.stderr),
+    )
+    ok &= check(
+        "it did not quietly print a dictionary entry",
+        "To look at something again." not in as_action.stdout,
+        repr(as_action.stdout),
+    )
+
+    print("scenario 10: an action flag rejects a word argument")
+    mixed = run_love(binary, ["--review", "maintain"], {**env, "EWH_CACHE": str(grammar_cache)})
+    ok &= check("exit code 2", mixed.returncode == 2, f"exit={mixed.returncode}")
+    ok &= check(
+        "the two grammars are reported as mutually exclusive",
+        "\u4e0d\u63a5\u53d7\u5355\u8bcd\u53c2\u6570" in mixed.stderr,
+        repr(mixed.stderr),
+    )
 
     srv.shutdown()
     print()

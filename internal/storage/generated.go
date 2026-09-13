@@ -3,28 +3,22 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/out-of-energy/love/internal/ai"
 )
 
-// DialogueLine is one turn of a short conversation.
-type DialogueLine struct {
-	Speaker string `json:"speaker"`
-	Line    string `json:"line"`
-}
-
-// Content is the expansion layer: everything the learner needs in order to use
-// a word, as opposed to merely recognise it.
+// DialogueLine and Content are aliases, not copies.
 //
-// Meaning is not a duplicate of the anchor's ELI5. The anchor is deliberately
-// written for a three-year-old so it can be read in one glance; this one is the
-// ordinary adult phrasing, shown afterwards. Simple first, fuller second.
-type Content struct {
-	Meaning  string         `json:"meaning"`
-	Examples []string       `json:"examples"`
-	Scene    string         `json:"scene"`
-	Dialogue []DialogueLine `json:"dialogue"`
-}
+// The expansion contract belongs to package ai, which is where the model's
+// output shape is defined and enforced. Storage persists that shape; defining a
+// second identical struct here would let the two drift, and a drift between
+// what is generated and what is stored is exactly the kind of bug that shows up
+// as missing fields months later.
+type DialogueLine = ai.Line
+
+// Content is the expansion layer for one word.
+type Content = ai.Content
 
 // Generated is the cached expansion for one word.
 //
@@ -39,48 +33,26 @@ type Generated struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// UsesWord reports whether text contains the word, ignoring case and matching
-// inflections loosely ("maintain" matches "maintains").
-func UsesWord(text, word string) bool {
-	text, word = strings.ToLower(text), strings.ToLower(strings.TrimSpace(word))
-	if word == "" {
-		return false
-	}
-	return strings.Contains(text, word)
-}
-
-// Validate enforces the content contract.
+// UsesWord reports whether text contains the word, ignoring case.
 //
-// The dialogue requirement is the one that matters. A model will happily return
-// a definition, an example and a scene while the conversation never actually
-// uses the target word — which is exactly the failure that makes the expansion
-// layer useless, because the whole point of a dialogue is to show the word
-// being used by someone.
+// It delegates to package ai so that the rule deciding whether a dialogue is
+// usable is written once, in the package that states the contract.
+func UsesWord(text, word string) bool { return ai.UsesWord(text, word) }
+
+// Validate reports whether the record is complete and its content satisfies the
+// expansion contract.
+//
+// The content rules live in package ai. This checks only what is storage's
+// business — that the record has an identity — and then hands the content to
+// the package that owns its shape.
 func (g Generated) Validate() error {
 	switch {
 	case g.WordID == "":
 		return fmt.Errorf("missing word_id")
 	case g.Word == "":
 		return fmt.Errorf("missing word")
-	case g.Content.Meaning == "":
-		return fmt.Errorf("missing meaning")
-	case len(g.Content.Examples) == 0:
-		return fmt.Errorf("no examples")
-	case len(g.Content.Dialogue) == 0:
-		return fmt.Errorf("no dialogue")
 	}
-
-	for i, line := range g.Content.Dialogue {
-		if strings.TrimSpace(line.Line) == "" {
-			return fmt.Errorf("dialogue line %d is empty", i+1)
-		}
-	}
-	for _, line := range g.Content.Dialogue {
-		if UsesWord(line.Line, g.Word) {
-			return nil
-		}
-	}
-	return fmt.Errorf("no dialogue line uses %q", g.Word)
+	return g.Content.Validate(g.Word)
 }
 
 // GeneratedStore reads and writes generated.jsonl.

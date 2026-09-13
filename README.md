@@ -1,0 +1,186 @@
+# love
+
+A cache-first command line English dictionary.
+
+```console
+$ love serendipity
+serendipity /ˌserənˈdɪpəti/
+
+ELI5: A happy thing you find by chance.
+
+中文：意外发现美好事物
+```
+
+The first lookup for a word asks DeepSeek for its IPA, an explanation simple
+enough for a three-year-old, and one common Chinese meaning. The answer is
+stored in your own word file. **Every lookup after that is served from that
+file with no network request and no cost.**
+
+## Why
+
+A word you already looked up should never cost money or time again. The word
+file is plain JSONL under your home directory, so it is readable, greppable,
+backup-able and hand-editable — it belongs to you, not to the tool.
+
+## Install
+
+Requires Go 1.26+.
+
+```bash
+go install github.com/kk/love@latest   # or:
+go build -trimpath -ldflags "-s -w" -o /opt/homebrew/bin/love .
+```
+
+## Setup
+
+The API key is read from the environment only. It is never written to disk,
+never logged, and never printed.
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+Add that line to `~/.zshrc` or `~/.bashrc` to make it permanent.
+
+## Usage
+
+```bash
+love <word>          # look a word up
+love --help
+love --version
+```
+
+Phrases work too, quoted or not:
+
+```bash
+love ice cream
+love "ice cream"
+```
+
+Input is normalized before lookup — trimmed, lowercased, and internal spacing
+collapsed — so `love EVIL` finds the entry stored for `evil`.
+
+## Output
+
+Exactly three lines, always:
+
+```text
+word /ipa/
+
+ELI5: <a very simple English explanation>
+
+中文：<one common Chinese meaning>
+```
+
+Nothing else is printed on success: no JSON, no file paths, no "saved"
+messages. On a terminal the head line is bold; when piped or when `NO_COLOR` is
+set, output is plain text.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | — | **Required.** Your DeepSeek API key. |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | API base URL. |
+| `EWH_CACHE` | `~/.ewh/words.jsonl` | Where the word file lives. |
+| `EWH_MODEL` | `deepseek-v4-flash` | Model id. |
+| `NO_COLOR` | — | Disable colored output when set. |
+
+The default model is the fastest and cheapest one, because a single word lookup
+does not need more. Reasoning is switched off for the same reason: reasoning
+tokens would only be discarded.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Unexpected error |
+| 2 | Usage or configuration error (no word, unknown flag, missing key) |
+| 3 | Network or API error |
+| 4 | The answer was printed but could not be cached |
+
+## The word file
+
+One JSON object per line, four fields, nothing else:
+
+```json
+{"word":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的"}
+```
+
+- A cache **hit** never writes to the file, so queries do not churn it.
+- A cache **miss** appends exactly one line, under a lock, and re-checks for a
+  duplicate first. Two simultaneous lookups cannot produce two records.
+- Damaged lines are **skipped with a warning**, never fatal — one bad line
+  cannot hide the rest of your dictionary.
+- Duplicate entries resolve to the **first** record, so an existing file with
+  duplicates keeps working.
+- The tool never rewrites history to "fix" the file on its own.
+
+## Testing
+
+Four layers, cheapest first. The first three need **no API key** and cost
+nothing, so they are the ones to run on every change.
+
+| Layer | Command | Key | Cost | Covers |
+|---|---|---|---|---|
+| 1. Unit | `go test ./...` | no | free | normalization, tolerant reading, first-record-wins, dedup append, HTTP parsing, retry and fallback, render format |
+| 2. Race | `go test -race -count=1 ./...` | no | free | concurrent appends under the write lock |
+| 3. End-to-end, mocked | `python3 scripts/e2e_mock_check.py` | no | free | the real binary over real HTTP: generate → persist → hit, plus every exit code |
+| 4. Real API | `love <new-word>` then `love <same-word>` | yes | ~1 call | the real model, real billing, real persistence |
+
+`scripts/e2e_mock_check.py` spawns a throwaway local HTTP server and drives the
+compiled binary against it. It asserts 19 conditions, including that the second
+lookup makes **zero** requests and that failures never write to the word file.
+Set `LOVE_BIN=/path/to/love` to test a binary that is not on `PATH`.
+
+### Manual smoke checklist
+
+```bash
+love evil                                   # cache hit, no key needed  -> 0
+love SIGN                                   # case-insensitive           -> 0
+love "  symlink "                           # trimming and phrases       -> 0
+love --nope                                 # unknown flag               -> 2
+love                                        # no word                    -> 2
+env -u DEEPSEEK_API_KEY love serendipity    # miss without a key         -> 2, empty stdout
+love curious | cat                          # piped output has no escapes
+```
+
+### Checking color by hand
+
+`love` colors output only when stdout is a terminal and `NO_COLOR` is unset.
+Many CI shells and editors export `NO_COLOR=1`, which correctly turns color
+off — do not mistake that for a bug.
+
+```bash
+love evil | cat -v                      # piped: no escape codes
+script -q /dev/null love evil | cat -v  # fake a tty: expect ^[[1m ... ^[[0m
+NO_COLOR=1 love evil                    # forced off
+```
+
+### Verifying the real API path
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+love curious        # first call hits the network and appends one line
+love curious        # second call must return instantly with no request
+```
+
+Confirm the second call is genuinely offline by running it with no key present
+at all — a cache hit must still succeed:
+
+```bash
+env -u DEEPSEEK_API_KEY love curious
+```
+
+## Roadmap
+
+Shipped (M1): `love <word>`, `--help`, `--version`.
+
+Planned (M2): `--json`, `show`, `list`, `stats`, `path`, `config`, `--refresh`,
+`--no-cache`. Planned (M3): `import`, `rm`, `export`. See `REQUIREMENTS.md`.
+
+## Note on the name
+
+`love` collides with the LÖVE (love2d) game engine's executable. If you have
+that installed, use an explicit path or a shell alias.

@@ -1,0 +1,14 @@
+# Compiled binary
+/love
+/love.exe
+
+# Your personal word file is data, not source. It lives in ~/.ewh/ and must
+# never be committed, even if you point EWH_CACHE at this directory.
+*.jsonl
+!testdata/**/*.jsonl
+
+# Write lock sidecar files
+*.lock
+
+# macOS
+.DS_Store

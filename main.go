@@ -4,8 +4,8 @@
 //
 // The first lookup for a word asks DeepSeek for its IPA, a deliberately
 // child-simple English explanation, and one common Chinese meaning, then stores
-// the result in a personal JSONL word file. Every later lookup is served from
-// that file with no network request and no cost.
+// the result in a personal word file. Every later lookup is served from that
+// file with no network request and no cost.
 package main
 
 import (
@@ -14,17 +14,18 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/out-of-energy/love/internal/cache"
 	"github.com/out-of-energy/love/internal/dict"
 	"github.com/out-of-energy/love/internal/render"
+	"github.com/out-of-energy/love/internal/storage"
 )
 
 // version is a var so release builds can override it with
 // -ldflags "-X main.version=...".
-var version = "0.1.0"
+var version = "0.2.0"
 
 // Documented exit codes. Scripts rely on these, so they are part of the
 // interface rather than an implementation detail.
@@ -37,11 +38,11 @@ const (
 )
 
 type config struct {
-	cachePath string
-	baseURL   string
-	model     string
-	timeout   time.Duration
-	color     bool
+	paths   storage.Paths
+	baseURL string
+	model   string
+	timeout time.Duration
+	color   bool
 }
 
 func main() {
@@ -67,16 +68,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 
-	// Cache first. A hit costs nothing and must never touch the network.
-	records, warnings, err := cache.Load(cfg.cachePath)
+	store := storage.OpenWords(cfg.paths.Words)
+
+	// Read first, so a damaged line is reported before anything else happens.
+	words, warnings, err := store.Load()
 	for _, warning := range warnings {
 		fmt.Fprintf(stderr, "love: warning: %s\n", warning)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "love: warning: cannot read %s: %v\n", cfg.cachePath, err)
+		fmt.Fprintf(stderr, "love: warning: cannot read %s: %v\n", cfg.paths.Words, err)
 	}
-	if rec, ok := cache.Lookup(records, word); ok {
-		render.Record(stdout, rec, cfg.color)
+
+	// Upgrade a pre-v0.3 file in place. This is the only write the tool performs
+	// without being asked, so it is deliberately conservative: only a clean file
+	// is rewritten, and the original is copied aside first.
+	if err == nil && len(warnings) == 0 {
+		if report, migrateErr := store.Migrate(time.Now()); migrateErr != nil {
+			fmt.Fprintf(stderr, "love: warning: %v\n", migrateErr)
+		} else if report.Performed {
+			fmt.Fprintf(stderr, "love: upgraded %d word(s) to the current format (backup: %s)\n",
+				report.Migrated, report.Backup)
+			if reloaded, _, reloadErr := store.Load(); reloadErr == nil {
+				words = reloaded
+			}
+		}
+	}
+
+	// Cache first. A hit costs nothing and must never touch the network.
+	if existing, ok := storage.Find(words, word); ok {
+		render.Record(stdout, existing.Word, existing.IPA, existing.ELI5, existing.Chinese, cfg.color)
 		return exitOK
 	}
 
@@ -95,24 +115,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 
 	client := dict.NewClient(apiKey, cfg.baseURL, cfg.model, cfg.timeout)
-	rec, err := client.Generate(ctx, word)
+	entry, err := client.Generate(ctx, word)
 	if err != nil {
 		fmt.Fprintf(stderr, "love: %v\n", err)
 		return exitAPI
 	}
 
-	// Save decides the canonical record: if another run stored this word while
-	// we were waiting on the API, its record wins and is what we print.
-	canonical, _, saveErr := cache.Save(cfg.cachePath, rec)
-	if saveErr != nil {
+	// Add is idempotent: if another run stored this word while we were waiting
+	// on the API, its record wins and is what we print.
+	added, err := store.Add(storage.Word{
+		Word:    entry.Word,
+		IPA:     entry.IPA,
+		ELI5:    entry.ELI5,
+		Chinese: entry.Chinese,
+	}, time.Now())
+	if err != nil {
 		// Never swallow a result the user already paid for, but never pretend
 		// it was remembered either.
-		render.Record(stdout, rec, cfg.color)
-		fmt.Fprintf(stderr, "love: warning: result was not cached: %v\n", saveErr)
+		render.Record(stdout, entry.Word, entry.IPA, entry.ELI5, entry.Chinese, cfg.color)
+		fmt.Fprintf(stderr, "love: warning: result was not saved: %v\n", err)
 		return exitCacheWrite
 	}
 
-	render.Record(stdout, canonical, cfg.color)
+	saved := added.Word
+	render.Record(stdout, saved.Word, saved.IPA, saved.ELI5, saved.Chinese, cfg.color)
 	return exitOK
 }
 
@@ -140,23 +166,29 @@ func parseArgs(args []string, stdout, stderr io.Writer) (word string, done bool,
 			words = append(words, arg)
 		}
 	}
-	return cache.Normalize(strings.Join(words, " ")), false, exitOK
+	return storage.Normalize(strings.Join(words, " ")), false, exitOK
 }
 
 func loadConfig() (config, error) {
-	path, err := cache.DefaultPath()
+	paths, err := storage.DefaultPaths()
 	if err != nil {
 		return config{}, err
 	}
 	cfg := config{
-		cachePath: path,
-		baseURL:   dict.DefaultBaseURL,
-		model:     dict.DefaultModel,
-		timeout:   15 * time.Second,
-		color:     render.IsTerminal(os.Stdout) && os.Getenv("NO_COLOR") == "",
+		paths:   paths,
+		baseURL: dict.DefaultBaseURL,
+		model:   dict.DefaultModel,
+		timeout: 15 * time.Second,
+		color:   render.IsTerminal(os.Stdout) && os.Getenv("NO_COLOR") == "",
+	}
+	if v := os.Getenv("EWH_DIR"); v != "" {
+		cfg.paths = storage.PathsIn(v)
 	}
 	if v := os.Getenv("EWH_CACHE"); v != "" {
-		cfg.cachePath = v
+		// Backwards compatible: the flag that used to name the only file now
+		// names the words file, and the other two live beside it.
+		cfg.paths = storage.PathsIn(filepath.Dir(v))
+		cfg.paths.Words = v
 	}
 	if v := os.Getenv("DEEPSEEK_BASE_URL"); v != "" {
 		cfg.baseURL = v
@@ -180,9 +212,15 @@ that is served from that file with no network request and no cost.
 Environment:
   DEEPSEEK_API_KEY    required, your DeepSeek API key (never stored)
   DEEPSEEK_BASE_URL   API base URL (default https://api.deepseek.com/v1)
-  EWH_CACHE           word file path (default ~/.ewh/words.jsonl)
+  EWH_DIR             store directory (default ~/.ewh)
+  EWH_CACHE           words file path, for backwards compatibility
   EWH_MODEL           model id (default `+dict.DefaultModel+`)
   NO_COLOR            disable colored output
+
+Files (under the store directory):
+  words.jsonl         your words
+  reviews.jsonl       your learning history
+  memory.json         derived state, rebuildable from the two above
 
 Flags:
   -h, --help          show this help

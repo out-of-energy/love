@@ -73,12 +73,14 @@ func TestGeneratePrefersTheCallersSpelling(t *testing.T) {
 		// The model answers with a different case; the caller's form must win.
 		io.WriteString(w, `{"choices":[{"message":{"content":"{\"word\":\"BOOK\",\"ipa\":\"/bʊk/\",\"eli5\":\"Thing with pages.\",\"chinese\":\"书\"}"}}]}`)
 	})
-	rec, err := c.Generate(context.Background(), "Ice   Cream")
+	// The caller supplies the canonical key, and this package must not silently
+	// rewrite it: normalization belongs to whoever owns the word file.
+	rec, err := c.Generate(context.Background(), "ice cream")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.Word != "ice cream" {
-		t.Errorf("word = %q, want the normalized caller input", rec.Word)
+		t.Errorf("word = %q, want the caller's key echoed back", rec.Word)
 	}
 }
 

@@ -17,8 +17,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/out-of-energy/love/internal/cache"
 )
 
 // DefaultBaseURL is the OpenAI-compatible DeepSeek endpoint.
@@ -50,6 +48,33 @@ Output the JSON object only. No markdown, no code fences, no commentary.`
 
 // ErrBadResponse means the model answered, but not with a usable record.
 var ErrBadResponse = errors.New("model response was not a valid dictionary record")
+
+// Entry is the content the model produced for one word.
+//
+// It is deliberately independent of any storage or scheduling type: this
+// package talks to a model and nothing else, so a change to the word file's
+// schema can never ripple in here.
+type Entry struct {
+	Word    string
+	IPA     string
+	ELI5    string
+	Chinese string
+}
+
+// Validate reports whether the model returned everything we asked for.
+func (e Entry) Validate() error {
+	switch {
+	case e.Word == "":
+		return fmt.Errorf("missing word")
+	case e.IPA == "":
+		return fmt.Errorf("missing ipa")
+	case e.ELI5 == "":
+		return fmt.Errorf("missing eli5")
+	case e.Chinese == "":
+		return fmt.Errorf("missing chinese")
+	}
+	return nil
+}
 
 // APIError is a non-2xx response from the API.
 type APIError struct {
@@ -134,7 +159,7 @@ type chatResponse struct {
 // Any failure that could plausibly be a fluke (transport error, 429, 5xx, or an
 // unusable answer) is attempted exactly once more. Everything else fails fast,
 // because burning paid requests on a permanent error helps nobody.
-func (c *Client) Generate(ctx context.Context, word string) (cache.Record, error) {
+func (c *Client) Generate(ctx context.Context, word string) (Entry, error) {
 	var lastErr error
 	for try := 0; try < 2; try++ {
 		rec, err := c.attempt(ctx, word, true)
@@ -148,18 +173,18 @@ func (c *Client) Generate(ctx context.Context, word string) (cache.Record, error
 			return c.attempt(ctx, word, false)
 		}
 		if !retryable(err) {
-			return cache.Record{}, err
+			return Entry{}, err
 		}
 		lastErr = err
 		if try == 0 {
 			select {
 			case <-ctx.Done():
-				return cache.Record{}, ctx.Err()
+				return Entry{}, ctx.Err()
 			case <-time.After(300 * time.Millisecond):
 			}
 		}
 	}
-	return cache.Record{}, lastErr
+	return Entry{}, lastErr
 }
 
 // retryable reports whether repeating the request could plausibly succeed.
@@ -179,7 +204,7 @@ func retryable(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-func (c *Client) attempt(ctx context.Context, word string, withThinkingControl bool) (cache.Record, error) {
+func (c *Client) attempt(ctx context.Context, word string, withThinkingControl bool) (Entry, error) {
 	body := chatRequest{
 		Model: c.Model,
 		Messages: []chatMessage{
@@ -196,25 +221,25 @@ func (c *Client) attempt(ctx context.Context, word string, withThinkingControl b
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return cache.Record{}, err
+		return Entry{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return cache.Record{}, err
+		return Entry{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return cache.Record{}, err
+		return Entry{}, err
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return cache.Record{}, err
+		return Entry{}, err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -229,22 +254,22 @@ func (c *Client) attempt(ctx context.Context, word string, withThinkingControl b
 		if apiErr.Message == "" {
 			apiErr.Message = strings.TrimSpace(string(data))
 		}
-		return cache.Record{}, apiErr
+		return Entry{}, apiErr
 	}
 
 	var parsed chatResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return cache.Record{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
+		return Entry{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
 	}
 	if len(parsed.Choices) == 0 {
-		return cache.Record{}, fmt.Errorf("%w: response contained no choices", ErrBadResponse)
+		return Entry{}, fmt.Errorf("%w: response contained no choices", ErrBadResponse)
 	}
 	return decodeRecord(parsed.Choices[0].Message.Content, word)
 }
 
 // decodeRecord extracts the JSON object the model was asked for, tolerating
 // markdown fences and surrounding prose, then enforces the four-field schema.
-func decodeRecord(content, word string) (cache.Record, error) {
+func decodeRecord(content, word string) (Entry, error) {
 	text := strings.TrimSpace(content)
 	if start := strings.Index(text, "{"); start >= 0 {
 		if end := strings.LastIndex(text, "}"); end > start {
@@ -252,15 +277,15 @@ func decodeRecord(content, word string) (cache.Record, error) {
 		}
 	}
 
-	var rec cache.Record
+	var rec Entry
 	if err := json.Unmarshal([]byte(text), &rec); err != nil {
-		return cache.Record{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
+		return Entry{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
 	}
 	// The caller's spelling is authoritative: the model must not be able to
-	// invent a second key for a word we already normalized.
-	rec.Word = cache.Normalize(word)
+	// invent a second key for a word the caller already normalized.
+	rec.Word = word
 	if err := rec.Validate(); err != nil {
-		return cache.Record{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
+		return Entry{}, fmt.Errorf("%w: %v", ErrBadResponse, err)
 	}
 	return rec, nil
 }

@@ -82,7 +82,8 @@ set, output is plain text.
 |---|---|---|
 | `DEEPSEEK_API_KEY` | — | **Required.** Your DeepSeek API key. |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | API base URL. |
-| `EWH_CACHE` | `~/.ewh/words.jsonl` | Where the word file lives. |
+| `EWH_DIR` | `~/.ewh` | Directory holding the store. |
+| `EWH_CACHE` | — | Words file path, kept for backwards compatibility. |
 | `EWH_MODEL` | `deepseek-v4-flash` | Model id. |
 | `NO_COLOR` | — | Disable colored output when set. |
 
@@ -102,20 +103,49 @@ tokens would only be discarded.
 
 ## The word file
 
-One JSON object per line, four fields, nothing else:
+One JSON object per line, eight fields, nothing else:
 
 ```json
-{"word":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的"}
+{"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
 ```
+
+The word file is one of three that live under the store directory:
+
+| File | Role |
+|---|---|
+| `words.jsonl` | your words |
+| `reviews.jsonl` | your learning history, append-only |
+| `memory.json` | derived state, rebuildable from the two above |
+
+`id` and `normalized` exist so a word has a stable identity and a single
+comparison key. `normalized` is stored rather than recomputed, so a future
+change to the normalization rule cannot silently re-partition existing data.
 
 - A cache **hit** never writes to the file, so queries do not churn it.
 - A cache **miss** appends exactly one line, under a lock, and re-checks for a
-  duplicate first. Two simultaneous lookups cannot produce two records.
+  duplicate first. Two simultaneous lookups cannot produce two records, and
+  adding the same word twice is idempotent.
 - Damaged lines are **skipped with a warning**, never fatal — one bad line
   cannot hide the rest of your dictionary.
 - Duplicate entries resolve to the **first** record, so an existing file with
   duplicates keeps working.
 - The tool never rewrites history to "fix" the file on its own.
+
+### Upgrading an older word file
+
+A file written by an earlier version (four fields, no `id`) is upgraded
+automatically the first time you run `love`:
+
+```console
+$ love evil
+love: upgraded 21 word(s) to the current format (backup: /Users/you/.ewh/words.jsonl.bak-20260913-150150)
+evil /ˈiːvəl/
+...
+```
+
+Every original field is preserved byte for byte, the file order is kept, and a
+backup is written first. If the file contains a damaged line the upgrade is
+**refused** rather than silently dropping it — fix the line and run again.
 
 ## Testing
 

@@ -882,20 +882,30 @@ Look a word up. The first lookup asks DeepSeek (fastest, cheapest model by
 default) and stores the answer in your personal word file; every lookup after
 that is served from that file with no network request and no cost.
 
-Actions:
-  --review                 开始今天的复习
-  --daily                  生成今天的邮件并发送
+`)
 
+	// The lists come from the registries rather than from this string. A second
+	// hand-maintained copy is a copy that drifts: --install-schedule existed
+	// for a while without appearing here at all.
+	fmt.Fprintln(w, "Actions:")
+	for _, a := range actions {
+		fmt.Fprintf(w, "  %-24s %s\n", strings.Join(a.flags, ", "), a.usage)
+	}
+	fmt.Fprint(w, `
   Actions are flags rather than subcommands on purpose: any word at all can be
   looked up, so a subcommand named after a word would make that word
   unlookupable.
 
-Options:
-  --dry-run                只渲染，不发送（配合 --daily）
-  --out FILE               把邮件 HTML 写入文件（配合 --daily）
+`)
+	fmt.Fprintln(w, "Options:")
+	for _, o := range options {
+		fmt.Fprintf(w, "  %-24s %s\n", o.flag, o.usage)
+	}
 
+	fmt.Fprint(w, `
 Environment:
-  DEEPSEEK_API_KEY    required for a new word; never stored
+  DEEPSEEK_API_KEY    your API key; required for a new word, never stored
+  DEEPSEEK_API_KEY_FILE  path to a file holding the key; preferred
   DEEPSEEK_BASE_URL   API base URL (default https://api.deepseek.com/v1)
   EWH_DIR             store directory (default ~/.ewh)
   EWH_CACHE           words file path, for backwards compatibility

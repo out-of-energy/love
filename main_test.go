@@ -242,15 +242,51 @@ func TestParseArgsHelpAndVersion(t *testing.T) {
 }
 
 // The help text is the only place the grammar is explained, so it has to name
-// both halves of it.
-func TestHelpDocumentsBothWordsAndActions(t *testing.T) {
+// every part of it — and it has to keep naming it. --install-schedule lived in
+// the registry for a while without appearing in the help at all, because the
+// help was a second hand-maintained list. This walks the registries instead, so
+// adding an action or an option and forgetting the help fails here.
+func TestHelpNamesEveryRegisteredFlag(t *testing.T) {
 	var out bytes.Buffer
 	printHelp(&out)
 	help := out.String()
 
-	for _, want := range []string{"love <word>", "Actions:", "--review"} {
+	for _, want := range []string{"love <word>", "Actions:", "Options:"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help does not mention %q", want)
+		}
+	}
+
+	for _, a := range actions {
+		if !strings.Contains(help, a.flags[0]) {
+			t.Errorf("action %q is registered but missing from the help", a.name)
+		}
+		if !strings.Contains(help, a.usage) {
+			t.Errorf("action %q is listed without its description", a.name)
+		}
+	}
+	for _, o := range options {
+		if !strings.Contains(help, o.flag) {
+			t.Errorf("option %q is registered but missing from the help", o.flag)
+		}
+	}
+}
+
+// The environment variables the code actually reads should be the ones the help
+// promises, so a reader can configure what exists.
+func TestHelpDocumentsTheEnvironmentTheCodeReads(t *testing.T) {
+	var out bytes.Buffer
+	printHelp(&out)
+	help := out.String()
+
+	for _, name := range []string{
+		"DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY_FILE", "DEEPSEEK_BASE_URL",
+		"EWH_DIR", "EWH_CACHE", "EWH_MODEL", "NO_COLOR",
+		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD_FILE",
+		"QQ_SMTP_AUTH_CODE", "LOVE_MAIL_TO",
+	} {
+		if !strings.Contains(help, name) {
+			t.Errorf("the code reads %s but the help does not mention it", name)
 		}
 	}
 }

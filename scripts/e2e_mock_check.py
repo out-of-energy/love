@@ -44,7 +44,26 @@ class MockAPI(http.server.BaseHTTPRequestHandler):
             self._send(400, {"error": {"message": "unknown field thinking", "code": "invalid_request_error"}})
             return
 
-        content = json.dumps(type(self).record, ensure_ascii=False)
+        # One endpoint serves two contracts. The anchor lookup and the expansion
+        # generator are told apart by their system prompt, which is how the real
+        # client distinguishes them too. The dialogue must contain the target
+        # word or the client is right to reject it.
+        system = body.get("messages", [{}])[0].get("content", "")
+        word = body.get("messages", [{}, {}])[1].get("content", "word")
+
+        if "dialogue" in system:
+            content = json.dumps({
+                "meaning": "to keep something in good condition",
+                "examples": [f"I {word} it every month."],
+                "scene": "Someone taking care of what they own.",
+                "dialogue": [
+                    {"speaker": "A", "line": "Your bike still looks new."},
+                    {"speaker": "B", "line": f"I {word} it every month."},
+                ],
+            }, ensure_ascii=False)
+        else:
+            content = json.dumps(type(self).record, ensure_ascii=False)
+
         self._send(200, {"choices": [{"message": {"role": "assistant", "content": content}}]})
 
     def _send(self, status, payload):
@@ -255,6 +274,49 @@ def main():
         "\u4e0d\u63a5\u53d7\u5355\u8bcd\u53c2\u6570" in mixed.stderr,
         repr(mixed.stderr),
     )
+
+    print("scenario 11: --daily generates the expansion layer and renders the mail")
+    daily_cache = tmp / "daily.jsonl"
+    daily_cache.write_text(
+        '{"id":"d1","word":"serendipity","normalized":"serendipity","ipa":"/\\u02ccser\\u0259n\\u02c8d\\u026ap\\u0259ti/",'
+        '"eli5":"A happy thing you find by chance.","chinese":"\\u610f\\u5916\\u53d1\\u73b0\\u7f8e\\u597d\\u4e8b\\u7269",'
+        '"source":"cli","created_at":"2026-09-01T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    out_html = tmp / "today.html"
+    MockAPI.calls = 0
+
+    daily = run_love(binary, ["--daily", "--dry-run", "--out", str(out_html)], {**env, "EWH_CACHE": str(daily_cache)})
+    ok &= check("exit code 0", daily.returncode == 0, daily.stderr)
+    ok &= check("one generation call was made", MockAPI.calls == 1, f"{MockAPI.calls} calls")
+    ok &= check("the html file was written", out_html.is_file())
+
+    html = out_html.read_text(encoding="utf-8") if out_html.is_file() else ""
+    ok &= check("the anchor layer is in the mail", "A happy thing you find by chance." in html, html[:200])
+    ok &= check(
+        "the expansion layer is in the mail",
+        "to keep something in good condition" in html,
+        "no expansion found",
+    )
+    ok &= check(
+        "the dialogue, which uses the word, is in the mail",
+        "serendipity it every month" in html,
+        "no dialogue found",
+    )
+
+    generated = tmp / "generated.jsonl"
+    ok &= check("the expansion was cached", generated.is_file())
+    if generated.is_file():
+        rows = [json.loads(l) for l in generated.read_text(encoding="utf-8").splitlines() if l.strip()]
+        ok &= check("one cached record", len(rows) == 1, str(len(rows)))
+        if rows:
+            ok &= check("it records which provider produced it", rows[0].get("provider") == "deepseek", str(rows[0].get("provider")))
+
+    print("scenario 12: a cached expansion is never regenerated")
+    MockAPI.calls = 0
+    again = run_love(binary, ["--daily", "--dry-run", "--out", str(tmp / "again.html")], {**env, "EWH_CACHE": str(daily_cache)})
+    ok &= check("exit code 0", again.returncode == 0, again.stderr)
+    ok &= check("zero generation calls", MockAPI.calls == 0, f"{MockAPI.calls} calls")
 
     srv.shutdown()
     print()

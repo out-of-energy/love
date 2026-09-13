@@ -335,3 +335,160 @@ func TestGradingIsPersistedAsAnEventAndACache(t *testing.T) {
 		t.Errorf("the graded word is still being offered as new: %+v", again.Plan)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Guards on the options, for the same reason as the guards on the actions: an
+// option that could be mistaken for a word would remove that word from the
+// dictionary.
+// ---------------------------------------------------------------------------
+
+func TestOptionFlagsCannotBeConfusedWithWords(t *testing.T) {
+	for _, o := range options {
+		if !strings.HasPrefix(o.flag, "-") {
+			t.Errorf("option %q does not begin with \"-\", so the word branch would swallow it", o.flag)
+		}
+	}
+}
+
+func TestOptionFlagsAreUniqueAndDoNotCollideWithActions(t *testing.T) {
+	claimed := map[string]string{}
+
+	for _, a := range actions {
+		for _, flag := range a.flags {
+			if owner, taken := claimed[flag]; taken {
+				t.Errorf("flag %q is claimed by both %q and action %q", flag, owner, a.name)
+			}
+			claimed[flag] = "action " + a.name
+		}
+	}
+	for _, o := range options {
+		if owner, taken := claimed[o.flag]; taken {
+			t.Errorf("flag %q is claimed by both %q and option %q", o.flag, owner, o.flag)
+		}
+		claimed[o.flag] = "option"
+	}
+}
+
+func TestAnOptionNeedingAValueReportsWhenItIsMissing(t *testing.T) {
+	var out, errOut bytes.Buffer
+	_, done, code := parseArgs([]string{"--daily", "--out"}, &out, &errOut)
+	if !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+	if !strings.Contains(errOut.String(), "需要一个值") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestABooleanOptionRejectsAValue(t *testing.T) {
+	var out, errOut bytes.Buffer
+	_, done, code := parseArgs([]string{"--daily", "--dry-run=yes"}, &out, &errOut)
+	if !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+	if !strings.Contains(errOut.String(), "不接受值") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+// An option on its own names no operation, so there is nothing to do.
+func TestAnOptionWithoutAnActionIsAUsageError(t *testing.T) {
+	var out, errOut bytes.Buffer
+	_, done, code := parseArgs([]string{"--dry-run"}, &out, &errOut)
+	if !done || code != exitUsage {
+		t.Fatalf("done=%v code=%d", done, code)
+	}
+	if !strings.Contains(errOut.String(), "必须与动作一起使用") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestOptionsAcceptBothSpellings(t *testing.T) {
+	for _, args := range [][]string{
+		{"--daily", "--out", "/tmp/x.html"},
+		{"--daily", "--out=/tmp/x.html"},
+	} {
+		var out, errOut bytes.Buffer
+		cmd, done, code := parseArgs(args, &out, &errOut)
+		if done || code != exitOK {
+			t.Fatalf("%v: done=%v code=%d stderr=%s", args, done, code, errOut.String())
+		}
+		if path, ok := cmd.optionValue("--out"); !ok || path != "/tmp/x.html" {
+			t.Errorf("%v: --out = %q (present=%v)", args, path, ok)
+		}
+	}
+}
+
+// The whole point of --dry-run: the content and layout can be produced and
+// checked without a mail server, and without a model if the content is already
+// cached.
+func TestDailyDryRunRendersWithoutSending(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words,
+		`{"id":"a1","word":"maintain","normalized":"maintain","ipa":"/meɪnˈteɪn/",`+
+			`"eli5":"To keep something working well.","chinese":"维护","source":"cli",`+
+			`"created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("QQ_SMTP_AUTH_CODE", "")
+	t.Setenv("SMTP_PASSWORD_FILE", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--daily", "--dry-run"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "maintain") || !strings.Contains(out, "ELI5: To keep something working well.") {
+		t.Errorf("the digest is missing its anchor layer:\n%s", out)
+	}
+	// No expansion was cached and no API key was set, so the digest must
+	// degrade rather than fail.
+	if strings.Contains(out, "扩展\n") {
+		t.Errorf("an expansion was rendered without any content:\n%s", out)
+	}
+	if !strings.Contains(stderr.String(), "DEEPSEEK_API_KEY") {
+		t.Errorf("the degraded run should say why there is no expansion: %q", stderr.String())
+	}
+}
+
+func TestDailySaysSoWhenThereIsNothingToDo(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, "")
+	t.Setenv("EWH_CACHE", paths.Words)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--daily", "--dry-run"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "没有需要复习的词") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+// Sending without configuration must fail with an explanation, not a stack of
+// unhelpful output — and it must name the dry run as the way out.
+func TestDailyWithoutMailConfigurationExplainsItself(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words,
+		`{"id":"a1","word":"maintain","normalized":"maintain","ipa":"/x/","eli5":"e",`+
+			`"chinese":"维护","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("SMTP_USER", "")
+	t.Setenv("SMTP_PASSWORD_FILE", "")
+	t.Setenv("QQ_SMTP_AUTH_CODE", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--daily"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "SMTP_USER") {
+		t.Errorf("stderr should name what is missing: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--dry-run") {
+		t.Errorf("stderr should point at the dry run: %q", stderr.String())
+	}
+}

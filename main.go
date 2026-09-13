@@ -21,6 +21,7 @@ import (
 
 	"github.com/out-of-energy/love/internal/ai"
 	"github.com/out-of-energy/love/internal/dict"
+	"github.com/out-of-energy/love/internal/mail"
 	"github.com/out-of-energy/love/internal/memory"
 	"github.com/out-of-energy/love/internal/render"
 	"github.com/out-of-energy/love/internal/review"
@@ -73,6 +74,28 @@ var actions = []action{
 		usage: "开始今天的复习",
 		run:   runReview,
 	},
+	{
+		name:  "daily",
+		flags: []string{"--daily"},
+		usage: "生成今天的邮件（扩展内容 + 复习清单）",
+		run:   runDaily,
+	},
+}
+
+// option is a modifier that actions may accept.
+//
+// Options are registered for the same reason actions are: the guards in
+// main_test.go can then prove mechanically that nothing claims a flag twice and
+// that no flag can be mistaken for a word.
+type option struct {
+	flag       string
+	usage      string
+	takesValue bool
+}
+
+var options = []option{
+	{flag: "--dry-run", usage: "只渲染，不发送"},
+	{flag: "--out", usage: "把邮件 HTML 写入文件", takesValue: true},
 }
 
 // lookupAction returns the action a flag belongs to.
@@ -87,6 +110,16 @@ func lookupAction(arg string) *action {
 	return nil
 }
 
+// lookupOption returns the option a flag belongs to, and whether it was found.
+func lookupOption(arg string) (option, bool) {
+	for _, o := range options {
+		if arg == o.flag {
+			return o, true
+		}
+	}
+	return option{}, false
+}
+
 type config struct {
 	paths   storage.Paths
 	baseURL string
@@ -99,6 +132,7 @@ type config struct {
 // registry stays a plain table.
 type app struct {
 	cfg    config
+	cmd    command
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
@@ -120,7 +154,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "love: %v\n", err)
 		return exitError
 	}
-	a := &app{cfg: cfg, stdin: stdin, stdout: stdout, stderr: stderr}
+	a := &app{cfg: cfg, cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr}
 
 	if cmd.action != nil {
 		return cmd.action.run(a)
@@ -129,10 +163,23 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 // command is what the arguments resolved to: either a word to look up, or an
-// engine operation.
+// engine operation with its options.
 type command struct {
-	word   string
-	action *action
+	word    string
+	action  *action
+	options map[string]string
+}
+
+// optionValue returns the value of an option, and whether it was given.
+func (c command) optionValue(flag string) (string, bool) {
+	v, ok := c.options[flag]
+	return v, ok
+}
+
+// has reports whether a flag was given.
+func (c command) has(flag string) bool {
+	_, ok := c.options[flag]
+	return ok
 }
 
 // parseArgs resolves arguments.
@@ -141,9 +188,11 @@ type command struct {
 // so `love --review maintain` is a usage error rather than a guess about which
 // one the user meant.
 func parseArgs(args []string, stdout, stderr io.Writer) (cmd command, done bool, code int) {
-	var words []string
+	cmd.options = map[string]string{}
 
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
 		switch arg {
 		case "-h", "--help", "help":
 			printHelp(stdout)
@@ -165,6 +214,26 @@ func parseArgs(args []string, stdout, stderr io.Writer) (cmd command, done bool,
 			continue
 		}
 
+		// An option may be written as --flag=value, which is why the name is
+		// split off before it is looked up.
+		name, inlineValue, hasInline := strings.Cut(arg, "=")
+		if parsed, ok := lookupOption(name); ok {
+			if parsed.takesValue && !hasInline {
+				if i+1 >= len(args) {
+					fmt.Fprintf(stderr, "love: %s 需要一个值\n", parsed.flag)
+					return command{}, true, exitUsage
+				}
+				i++
+				inlineValue = args[i]
+			}
+			if !parsed.takesValue && hasInline {
+				fmt.Fprintf(stderr, "love: %s 不接受值\n", parsed.flag)
+				return command{}, true, exitUsage
+			}
+			cmd.options[parsed.flag] = inlineValue
+			continue
+		}
+
 		if strings.HasPrefix(arg, "-") {
 			fmt.Fprintf(stderr, "love: unknown option %q\n", arg)
 			if len(actions) > 0 {
@@ -173,14 +242,24 @@ func parseArgs(args []string, stdout, stderr io.Writer) (cmd command, done bool,
 					fmt.Fprintf(stderr, "  %-12s %s\n", strings.Join(a.flags, ", "), a.usage)
 				}
 			}
+			if len(options) > 0 {
+				fmt.Fprintln(stderr, "可用的选项:")
+				for _, o := range options {
+					fmt.Fprintf(stderr, "  %-12s %s\n", o.flag, o.usage)
+				}
+			}
 			fmt.Fprintln(stderr, "Try 'love --help' for more information.")
 			return command{}, true, exitUsage
 		}
 
-		words = append(words, arg)
+		cmd.word = storage.Normalize(strings.Join([]string{cmd.word, arg}, " "))
 	}
 
-	cmd.word = storage.Normalize(strings.Join(words, " "))
+	if cmd.action == nil && len(cmd.options) > 0 {
+		fmt.Fprintln(stderr, "love: 选项必须与动作一起使用")
+		fmt.Fprintln(stderr, "Try 'love --help' for more information.")
+		return command{}, true, exitUsage
+	}
 
 	if cmd.action != nil && cmd.word != "" {
 		fmt.Fprintf(stderr, "love: %s 不接受单词参数\n", cmd.action.flags[0])
@@ -370,6 +449,193 @@ func buildReviewPorts(cfg config, now time.Time) (review.Ports, error) {
 	}, nil
 }
 
+// runDaily builds today's digest, generating any missing expansion content, and
+// delivers it.
+//
+// Generation and delivery are deliberately separate steps: a word whose
+// expansion failed to generate still appears in the email with its anchor
+// layer, because a broken model call must never cost the learner the day's
+// review. The same split is why --dry-run exists — the content and the layout
+// can be inspected without sending anything.
+func runDaily(a *app) int {
+	now := time.Now()
+	session := memory.DefaultConfig()
+
+	words, warnings, err := storage.OpenWords(a.cfg.paths.Words).Load()
+	for _, w := range warnings {
+		fmt.Fprintf(a.stderr, "love: warning: %s\n", w)
+	}
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: cannot read words: %v\n", err)
+		return exitError
+	}
+
+	reviews, _, err := storage.OpenReviews(a.cfg.paths.Reviews).Load()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: cannot read review history: %v\n", err)
+		return exitError
+	}
+
+	states := session.Reduce(reviews)
+
+	byID := make(map[string]storage.Word, len(words))
+	unlearned := make([]string, 0, len(words))
+	for _, w := range words {
+		byID[w.ID] = w
+		if _, started := states[w.ID]; !started {
+			unlearned = append(unlearned, w.ID)
+		}
+	}
+
+	plan := session.PlanDay(now, states, unlearned)
+	if plan.Total() == 0 {
+		fmt.Fprintln(a.stdout, "今天没有需要复习的词。")
+		return exitOK
+	}
+	today := append(append([]string{}, plan.Review...), plan.New...)
+
+	generated, _, err := storage.OpenGenerated(a.cfg.paths.Generated).Load()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: warning: cannot read generated content: %v\n", err)
+	}
+	content := make(map[string]ai.Content, len(generated))
+	for _, g := range generated {
+		content[g.WordID] = g.Content
+	}
+
+	// Only words the digest will actually show are worth generating for, and
+	// each is generated at most once ever: the cache is what keeps a word's
+	// practice material stable from day to day.
+	var missing []string
+	for _, id := range today {
+		if _, ok := content[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		generatedCount, genErr := generateMissing(a, missing, byID, content)
+		if genErr != nil {
+			fmt.Fprintf(a.stderr, "love: warning: %v\n", genErr)
+		}
+		if generatedCount > 0 {
+			fmt.Fprintf(a.stderr, "love: 生成了 %d 个词的扩展内容\n", generatedCount)
+		}
+	}
+
+	digest := mail.Digest{Date: now}
+	for _, id := range today {
+		w, ok := byID[id]
+		if !ok {
+			continue
+		}
+		entry := mail.Word{Word: w.Word, IPA: w.IPA, ELI5: w.ELI5, Chinese: w.Chinese}
+		if c, ok := content[id]; ok {
+			copied := c
+			entry.Content = &copied
+		}
+		digest.Words = append(digest.Words, entry)
+	}
+
+	htmlBody, err := mail.RenderHTML(digest)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitError
+	}
+	textBody, err := mail.RenderText(digest)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitError
+	}
+
+	if path, ok := a.cmd.optionValue("--out"); ok {
+		if err := os.WriteFile(path, []byte(htmlBody), 0o644); err != nil {
+			fmt.Fprintf(a.stderr, "love: cannot write %s: %v\n", path, err)
+			return exitError
+		}
+		fmt.Fprintf(a.stdout, "已写入 %s\n", path)
+	}
+
+	if a.cmd.has("--dry-run") {
+		fmt.Fprint(a.stdout, textBody)
+		return exitOK
+	}
+
+	smtp, err := mail.ConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		fmt.Fprintln(a.stderr, "用 --dry-run 可以只渲染不发送，用 --out FILE 可以存成 HTML。")
+		return exitUsage
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	if err := mail.NewSender(smtp).Send(ctx, mail.Subject(digest), htmlBody, textBody); err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitAPI
+	}
+	fmt.Fprintf(a.stdout, "已发送到 %s\n", smtp.To)
+	return exitOK
+}
+
+// generateMissing fills in expansion content for the given words.
+//
+// Failures are collected rather than fatal: a digest with three anchors and two
+// expansions is worth far more than no digest at all.
+func generateMissing(a *app, missing []string, byID map[string]storage.Word, content map[string]ai.Content) (int, error) {
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		fmt.Fprintln(a.stderr, "love: DEEPSEEK_API_KEY is not set; 本次邮件只包含锚点层")
+		return 0, nil
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	provider := ai.NewDeepSeek(apiKey, a.cfg.baseURL, a.cfg.model, 90*time.Second)
+	store := storage.OpenGenerated(a.cfg.paths.Generated)
+
+	generatedCount := 0
+	var failures []string
+
+	for i, id := range missing {
+		w, ok := byID[id]
+		if !ok {
+			continue
+		}
+		if a.cfg.color {
+			fmt.Fprintf(a.stderr, "\r  %d/%d 生成扩展内容…", i+1, len(missing))
+		}
+
+		c, err := provider.GenerateContent(ctx, w.Word)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", w.Word, err))
+			continue
+		}
+		saved, _, err := store.Save(storage.Generated{
+			WordID:   id,
+			Word:     w.Word,
+			Provider: provider.Name(),
+			Content:  c,
+		}, time.Now())
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", w.Word, err))
+			continue
+		}
+		content[id] = saved.Content
+		generatedCount++
+	}
+	if a.cfg.color && len(missing) > 0 {
+		fmt.Fprint(a.stderr, "\r\033[K")
+	}
+
+	if len(failures) > 0 {
+		return generatedCount, fmt.Errorf("%d 个词的扩展内容生成失败（邮件已降级为锚点层）：%s",
+			len(failures), strings.Join(failures, "; "))
+	}
+	return generatedCount, nil
+}
+
 func loadConfig() (config, error) {
 	paths, err := storage.DefaultPaths()
 	if err != nil {
@@ -412,10 +678,15 @@ that is served from that file with no network request and no cost.
 
 Actions:
   --review                 开始今天的复习
+  --daily                  生成今天的邮件并发送
 
   Actions are flags rather than subcommands on purpose: any word at all can be
   looked up, so a subcommand named after a word would make that word
   unlookupable.
+
+Options:
+  --dry-run                只渲染，不发送（配合 --daily）
+  --out FILE               把邮件 HTML 写入文件（配合 --daily）
 
 Environment:
   DEEPSEEK_API_KEY    required for a new word; never stored
@@ -424,6 +695,14 @@ Environment:
   EWH_CACHE           words file path, for backwards compatibility
   EWH_MODEL           model id (default `+dict.DefaultModel+`)
   NO_COLOR            disable colored output
+
+Mail (needed for --daily to send):
+  SMTP_HOST           default smtp.qq.com
+  SMTP_PORT           default 465 (implicit TLS)
+  SMTP_USER           the account, used as sender and default recipient
+  SMTP_PASSWORD_FILE  path to a file holding the password (preferred)
+  QQ_SMTP_AUTH_CODE   16-digit QQ authorization code, if no file is given
+  LOVE_MAIL_TO        recipient, default SMTP_USER
 
 Files (under the store directory):
   words.jsonl         your words
@@ -439,5 +718,7 @@ Examples:
   love serendipity
   love ice cream
   love --review
+  love --daily --dry-run
+  love --daily --out /tmp/today.html
 `)
 }

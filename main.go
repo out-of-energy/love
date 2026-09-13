@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/out-of-energy/love/internal/memory"
 	"github.com/out-of-energy/love/internal/render"
 	"github.com/out-of-energy/love/internal/review"
+	"github.com/out-of-energy/love/internal/schedule"
 	"github.com/out-of-energy/love/internal/storage"
 )
 
@@ -77,8 +79,20 @@ var actions = []action{
 	{
 		name:  "daily",
 		flags: []string{"--daily"},
-		usage: "生成今天的邮件（扩展内容 + 复习清单）",
+		usage: "生成今天的邮件并发送",
 		run:   runDaily,
+	},
+	{
+		name:  "install-schedule",
+		flags: []string{"--install-schedule"},
+		usage: "安装每日定时任务（launchd，默认 07:30）",
+		run:   runInstallSchedule,
+	},
+	{
+		name:  "uninstall-schedule",
+		flags: []string{"--uninstall-schedule"},
+		usage: "移除每日定时任务",
+		run:   runUninstallSchedule,
 	},
 }
 
@@ -96,6 +110,8 @@ type option struct {
 var options = []option{
 	{flag: "--dry-run", usage: "只渲染，不发送"},
 	{flag: "--out", usage: "把邮件 HTML 写入文件", takesValue: true},
+	{flag: "--at", usage: "定时任务每天运行的时间 HH:MM", takesValue: true},
+	{flag: "--now", usage: "安装后立刻试跑一次"},
 }
 
 // lookupAction returns the action a flag belongs to.
@@ -311,7 +327,7 @@ func lookup(a *app, word string) int {
 	}
 
 	// Only now, on a genuine miss, do we need a key.
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	apiKey := deepSeekKey()
 	if apiKey == "" {
 		fmt.Fprintln(a.stderr, "love: DEEPSEEK_API_KEY is not set")
 		fmt.Fprintln(a.stderr)
@@ -583,7 +599,7 @@ func runDaily(a *app) int {
 // Failures are collected rather than fatal: a digest with three anchors and two
 // expansions is worth far more than no digest at all.
 func generateMissing(a *app, missing []string, byID map[string]storage.Word, content map[string]ai.Content) (int, error) {
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	apiKey := deepSeekKey()
 	if apiKey == "" {
 		fmt.Fprintln(a.stderr, "love: DEEPSEEK_API_KEY is not set; 本次邮件只包含锚点层")
 		return 0, nil
@@ -634,6 +650,163 @@ func generateMissing(a *app, missing []string, byID map[string]storage.Word, con
 			len(failures), strings.Join(failures, "; "))
 	}
 	return generatedCount, nil
+}
+
+// runInstallSchedule registers the daily run with launchd.
+func runInstallSchedule(a *app) int {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: cannot determine the executable path: %v\n", err)
+		return exitError
+	}
+	// launchd stores the path verbatim, so recording a symlink that later moves
+	// would leave a job that silently never runs.
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+
+	hour, minute := 7, 30
+	if value, ok := a.cmd.optionValue("--at"); ok {
+		parsedHour, parsedMinute, err := parseClock(value)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "love: %v\n", err)
+			return exitUsage
+		}
+		hour, minute = parsedHour, parsedMinute
+	}
+
+	env, err := scheduleEnv()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitUsage
+	}
+
+	job := schedule.Job{
+		Binary: exe,
+		Hour:   hour,
+		Minute: minute,
+		Env:    env,
+		LogDir: filepath.Join(filepath.Dir(a.cfg.paths.Words), "logs"),
+	}
+	path, err := job.Install()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitError
+	}
+
+	fmt.Fprintf(a.stdout, "已安装 %s\n", path)
+	fmt.Fprintf(a.stdout, "每天 %02d:%02d 运行 %s --daily\n", hour, minute, exe)
+	fmt.Fprintf(a.stdout, "日志：%s\n", filepath.Join(job.LogDir, "daily.err"))
+	fmt.Fprintln(a.stdout, "笔记本休眠错过时间时，launchd 会在唤醒后补跑。")
+
+	if a.cmd.has("--now") {
+		if err := schedule.RunNow(); err != nil {
+			fmt.Fprintf(a.stderr, "love: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(a.stdout, "已触发一次试跑，稍后看日志和邮箱。")
+	}
+	return exitOK
+}
+
+func runUninstallSchedule(a *app) int {
+	removed, err := schedule.Uninstall()
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: %v\n", err)
+		return exitError
+	}
+	if !removed {
+		fmt.Fprintln(a.stdout, "定时任务本来就没有安装。")
+		return exitOK
+	}
+	fmt.Fprintln(a.stdout, "已移除定时任务。")
+	return exitOK
+}
+
+// parseClock reads an HH:MM time.
+func parseClock(value string) (hour, minute int, err error) {
+	bad := fmt.Errorf("时间格式应为 HH:MM，收到 %q", value)
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 {
+		return 0, 0, bad
+	}
+	hour, hourErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	minute, minuteErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if hourErr != nil || minuteErr != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, bad
+	}
+	return hour, minute, nil
+}
+
+// scheduleEnv builds the environment the scheduled run will receive.
+//
+// It refuses to embed a secret. A property list is readable by anything running
+// as the user and `launchctl print` reproduces it in full, so the only safe
+// thing to record is the path to a file that holds the secret. Refusing loudly
+// beats writing the key somewhere it will later be printed into a bug report.
+func scheduleEnv() (map[string]string, error) {
+	env := map[string]string{
+		"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+	}
+	for _, name := range []string{
+		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "LOVE_MAIL_TO", "EWH_DIR", "EWH_CACHE",
+	} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			env[name] = value
+		}
+	}
+
+	if path := strings.TrimSpace(os.Getenv("SMTP_PASSWORD_FILE")); path != "" {
+		env["SMTP_PASSWORD_FILE"] = expandHome(path)
+	} else if os.Getenv("SMTP_PASSWORD") != "" || os.Getenv("QQ_SMTP_AUTH_CODE") != "" {
+		return nil, fmt.Errorf("定时任务不会把密码写进 plist（`launchctl print` 会原样打印它）。\n" +
+			"  先写入文件再安装：\n" +
+			"    printf '%%s' '你的16位授权码' > $HOME/.ewh/smtp-password && chmod 600 $HOME/.ewh/smtp-password\n" +
+			"    export SMTP_PASSWORD_FILE=$HOME/.ewh/smtp-password")
+	}
+
+	if path := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY_FILE")); path != "" {
+		env["DEEPSEEK_API_KEY_FILE"] = expandHome(path)
+	} else if strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")) != "" {
+		return nil, fmt.Errorf("同理，API key 也只接受文件路径。\n" +
+			"    printf '%%s' \"$DEEPSEEK_API_KEY\" > $HOME/.ewh/deepseek-key && chmod 600 $HOME/.ewh/deepseek-key\n" +
+			"    export DEEPSEEK_API_KEY_FILE=$HOME/.ewh/deepseek-key")
+	}
+
+	return env, nil
+}
+
+// expandHome resolves a leading ~, which a shell would have expanded but an
+// environment variable does not.
+func expandHome(path string) string {
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path
+}
+
+// deepSeekKey returns the API key, preferring a file over the environment.
+//
+// The environment is only a fallback. A launch agent inherits no shell profile,
+// so a scheduled run needs the key somewhere else — and writing it into the
+// property list would put a secret where `launchctl print` reproduces it in
+// full.
+func deepSeekKey() string {
+	if path := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY_FILE")); path != "" {
+		if data, err := os.ReadFile(expandHome(path)); err == nil {
+			if key := strings.TrimSpace(string(data)); key != "" {
+				return key
+			}
+		}
+	}
+	return strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
 }
 
 func loadConfig() (config, error) {

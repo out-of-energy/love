@@ -492,3 +492,139 @@ func TestDailyWithoutMailConfigurationExplainsItself(t *testing.T) {
 		t.Errorf("stderr should point at the dry run: %q", stderr.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Scheduling.
+// ---------------------------------------------------------------------------
+
+func TestParseClock(t *testing.T) {
+	for input, want := range map[string][2]int{
+		"7:30":  {7, 30},
+		"07:30": {7, 30},
+		"0:00":  {0, 0},
+		"23:59": {23, 59},
+		" 8:5 ": {8, 5},
+	} {
+		hour, minute, err := parseClock(input)
+		if err != nil {
+			t.Errorf("parseClock(%q) failed: %v", input, err)
+			continue
+		}
+		if hour != want[0] || minute != want[1] {
+			t.Errorf("parseClock(%q) = %d:%d, want %d:%d", input, hour, minute, want[0], want[1])
+		}
+	}
+
+	for _, bad := range []string{"", "7", "7:", ":30", "24:00", "7:60", "-1:00", "seven:30", "7:30:00"} {
+		if _, _, err := parseClock(bad); err == nil {
+			t.Errorf("parseClock(%q) should have failed", bad)
+		}
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	if got := expandHome("~/x"); got != filepath.Join(home, "x") {
+		t.Errorf("expandHome(~/x) = %q", got)
+	}
+	if got := expandHome("~"); got != home {
+		t.Errorf("expandHome(~) = %q", got)
+	}
+	if got := expandHome("/absolute"); got != "/absolute" {
+		t.Errorf("an absolute path must be untouched, got %q", got)
+	}
+	if got := expandHome("relative"); got != "relative" {
+		t.Errorf("a relative path must be untouched, got %q", got)
+	}
+}
+
+// A property list is readable by anything running as the user, and
+// `launchctl print` reproduces it in full. The installer therefore refuses to
+// record a secret rather than quietly writing one somewhere it will later be
+// pasted into a bug report.
+func TestScheduleEnvRefusesToEmbedSecrets(t *testing.T) {
+	t.Setenv("SMTP_USER", "me@example.com")
+	t.Setenv("SMTP_PASSWORD_FILE", "")
+	t.Setenv("SMTP_PASSWORD", "")
+	t.Setenv("QQ_SMTP_AUTH_CODE", "live-auth-code")
+	t.Setenv("DEEPSEEK_API_KEY_FILE", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	_, err := scheduleEnv()
+	if err == nil {
+		t.Fatal("expected the installer to refuse an inline password")
+	}
+	if !strings.Contains(err.Error(), "SMTP_PASSWORD_FILE") {
+		t.Errorf("the error should name the file variable: %q", err)
+	}
+	if strings.Contains(err.Error(), "live-auth-code") {
+		t.Error("the error must not echo the secret back")
+	}
+}
+
+func TestScheduleEnvRefusesToEmbedTheAPIToken(t *testing.T) {
+	t.Setenv("SMTP_USER", "me@example.com")
+	t.Setenv("SMTP_PASSWORD_FILE", "/tmp/pw")
+	t.Setenv("SMTP_PASSWORD", "")
+	t.Setenv("QQ_SMTP_AUTH_CODE", "")
+	t.Setenv("DEEPSEEK_API_KEY_FILE", "")
+	t.Setenv("DEEPSEEK_API_KEY", "sk-secret")
+
+	_, err := scheduleEnv()
+	if err == nil {
+		t.Fatal("expected the installer to refuse an inline API key")
+	}
+	if strings.Contains(err.Error(), "sk-secret") {
+		t.Error("the error must not echo the secret back")
+	}
+}
+
+func TestScheduleEnvRecordsPathsAndExpandsHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	t.Setenv("SMTP_USER", "me@example.com")
+	t.Setenv("SMTP_PASSWORD_FILE", "~/.ewh/smtp-password")
+	t.Setenv("DEEPSEEK_API_KEY_FILE", "~/.ewh/deepseek-key")
+	t.Setenv("LOVE_MAIL_TO", "me@example.com")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("QQ_SMTP_AUTH_CODE", "")
+
+	env, err := scheduleEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env["SMTP_PASSWORD_FILE"]; got != filepath.Join(home, ".ewh", "smtp-password") {
+		t.Errorf("SMTP_PASSWORD_FILE = %q, want an expanded absolute path", got)
+	}
+	if got := env["DEEPSEEK_API_KEY_FILE"]; got != filepath.Join(home, ".ewh", "deepseek-key") {
+		t.Errorf("DEEPSEEK_API_KEY_FILE = %q", got)
+	}
+	if env["SMTP_USER"] != "me@example.com" || env["LOVE_MAIL_TO"] != "me@example.com" {
+		t.Errorf("the non-secret settings should pass through: %v", env)
+	}
+	if _, ok := env["PATH"]; !ok {
+		t.Error("launchd consults no PATH of its own, so one must be recorded")
+	}
+}
+
+func TestScheduleOptionsParse(t *testing.T) {
+	var out, errOut bytes.Buffer
+	cmd, done, code := parseArgs([]string{"--install-schedule", "--at", "06:45", "--now"}, &out, &errOut)
+	if done || code != exitOK {
+		t.Fatalf("done=%v code=%d stderr=%s", done, code, errOut.String())
+	}
+	if cmd.action == nil || cmd.action.name != "install-schedule" {
+		t.Fatalf("action = %+v", cmd.action)
+	}
+	if v, ok := cmd.optionValue("--at"); !ok || v != "06:45" {
+		t.Errorf("--at = %q (present=%v)", v, ok)
+	}
+	if !cmd.has("--now") {
+		t.Error("--now should be recorded")
+	}
+}

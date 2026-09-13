@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/smtp"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -166,7 +167,7 @@ func ConfigFromEnv() (SenderConfig, error) {
 	cfg.To = envOr("LOVE_MAIL_TO", cfg.Username)
 
 	if path := os.Getenv("SMTP_PASSWORD_FILE"); path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(expandHome(path))
 		if err != nil {
 			return SenderConfig{}, fmt.Errorf("cannot read SMTP_PASSWORD_FILE: %w", err)
 		}
@@ -183,6 +184,20 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// expandHome resolves a leading ~, which a shell would have expanded but an
+// environment variable does not. A password file named as ~/.ewh/smtp-password
+// would otherwise be looked for literally, under a directory called "~".
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~"))
 }
 
 // addressOnly strips a display name, since the SMTP envelope wants a bare

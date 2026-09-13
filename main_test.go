@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/out-of-energy/love/internal/memory"
+	"github.com/out-of-energy/love/internal/schedule"
 	"github.com/out-of-energy/love/internal/storage"
 )
 
@@ -626,5 +627,39 @@ func TestScheduleOptionsParse(t *testing.T) {
 	}
 	if !cmd.has("--now") {
 		t.Error("--now should be recorded")
+	}
+}
+
+func TestParseTimes(t *testing.T) {
+	got, err := parseTimes("07:30,12:30,20:30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []schedule.TimeOfDay{{Hour: 7, Minute: 30}, {Hour: 12, Minute: 30}, {Hour: 20, Minute: 30}}
+	if len(got) != len(want) {
+		t.Fatalf("got %d times, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("time %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	// One time is still the common case and must keep working.
+	single, err := parseTimes("7:30")
+	if err != nil || len(single) != 1 || single[0] != (schedule.TimeOfDay{Hour: 7, Minute: 30}) {
+		t.Errorf("parseTimes(7:30) = %v, %v", single, err)
+	}
+
+	// Forgiving about spacing, strict about the times themselves.
+	spaced, err := parseTimes(" 07:30 , 20:30 ")
+	if err != nil || len(spaced) != 2 {
+		t.Errorf("parseTimes with spaces = %v, %v", spaced, err)
+	}
+
+	for _, bad := range []string{"", "  ", "7:30,", "7:30,25:00", "morning", "7:30,,nope"} {
+		if _, err := parseTimes(bad); err == nil {
+			t.Errorf("parseTimes(%q) should have failed", bad)
+		}
 	}
 }

@@ -110,7 +110,7 @@ type option struct {
 var options = []option{
 	{flag: "--dry-run", usage: "只渲染，不发送"},
 	{flag: "--out", usage: "把邮件 HTML 写入文件", takesValue: true},
-	{flag: "--at", usage: "定时任务每天运行的时间 HH:MM", takesValue: true},
+	{flag: "--at", usage: "运行时间，多个用逗号分隔（如 07:30,12:30,20:30）", takesValue: true},
 	{flag: "--now", usage: "安装后立刻试跑一次"},
 }
 
@@ -665,14 +665,14 @@ func runInstallSchedule(a *app) int {
 		exe = resolved
 	}
 
-	hour, minute := 7, 30
+	times := []schedule.TimeOfDay{{Hour: 7, Minute: 30}}
 	if value, ok := a.cmd.optionValue("--at"); ok {
-		parsedHour, parsedMinute, err := parseClock(value)
+		parsed, err := parseTimes(value)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "love: %v\n", err)
 			return exitUsage
 		}
-		hour, minute = parsedHour, parsedMinute
+		times = parsed
 	}
 
 	env, err := scheduleEnv()
@@ -683,8 +683,7 @@ func runInstallSchedule(a *app) int {
 
 	job := schedule.Job{
 		Binary: exe,
-		Hour:   hour,
-		Minute: minute,
+		Times:  times,
 		Env:    env,
 		LogDir: filepath.Join(filepath.Dir(a.cfg.paths.Words), "logs"),
 	}
@@ -695,7 +694,7 @@ func runInstallSchedule(a *app) int {
 	}
 
 	fmt.Fprintf(a.stdout, "已安装 %s\n", path)
-	fmt.Fprintf(a.stdout, "每天 %02d:%02d 运行 %s --daily\n", hour, minute, exe)
+	fmt.Fprintf(a.stdout, "每天 %s 运行 %s --daily（共 %d 次）\n", formatTimes(times), exe, len(times))
 	fmt.Fprintf(a.stdout, "日志：%s\n", filepath.Join(job.LogDir, "daily.err"))
 	fmt.Fprintln(a.stdout, "笔记本休眠错过时间时，launchd 会在唤醒后补跑。")
 
@@ -721,6 +720,40 @@ func runUninstallSchedule(a *app) int {
 	}
 	fmt.Fprintln(a.stdout, "已移除定时任务。")
 	return exitOK
+}
+
+// formatTimes renders a schedule for a human.
+func formatTimes(times []schedule.TimeOfDay) string {
+	parts := make([]string, 0, len(times))
+	for _, t := range times {
+		parts = append(parts, t.String())
+	}
+	return strings.Join(parts, " · ")
+}
+
+// parseTimes reads one or more HH:MM times, comma-separated.
+//
+// More than one time is how a thrice-daily push is expressed: launchd takes an
+// array of intervals, so three sends are one job rather than three agents.
+func parseTimes(value string) ([]schedule.TimeOfDay, error) {
+	var times []schedule.TimeOfDay
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		// A trailing or doubled comma is a typo. Skipping it silently would drop
+		// a run time the user believed they had set.
+		if part == "" {
+			return nil, fmt.Errorf("时间应为 HH:MM，多个用逗号分隔（如 07:30,12:30,20:30），收到 %q", value)
+		}
+		hour, minute, err := parseClock(part)
+		if err != nil {
+			return nil, fmt.Errorf("时间应为 HH:MM，多个用逗号分隔（如 07:30,12:30,20:30），收到 %q", value)
+		}
+		times = append(times, schedule.TimeOfDay{Hour: hour, Minute: minute})
+	}
+	if len(times) == 0 {
+		return nil, fmt.Errorf("没有解析出任何时间：%q", value)
+	}
+	return times, nil
 }
 
 // parseClock reads an HH:MM time.
@@ -893,5 +926,6 @@ Examples:
   love --review
   love --daily --dry-run
   love --daily --out /tmp/today.html
+  love --install-schedule --at 07:30,12:30,20:30
 `)
 }

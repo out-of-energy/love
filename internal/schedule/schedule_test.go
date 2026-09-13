@@ -12,8 +12,7 @@ import (
 func testJob() Job {
 	return Job{
 		Binary: "/opt/homebrew/bin/love",
-		Hour:   7,
-		Minute: 30,
+		Times:  []TimeOfDay{{Hour: 7, Minute: 30}},
 		Env: map[string]string{
 			"SMTP_USER":          "me@example.com",
 			"SMTP_PASSWORD_FILE": "/Users/me/.ewh/smtp-password",
@@ -45,12 +44,16 @@ func TestPlistHasTheStructureLaunchdNeeds(t *testing.T) {
 		t.Errorf("ProgramArguments = %v", args)
 	}
 
-	interval, ok := got["StartCalendarInterval"].(map[string]any)
-	if !ok {
-		t.Fatalf("StartCalendarInterval = %#v", got["StartCalendarInterval"])
+	intervals, ok := got["StartCalendarInterval"].([]any)
+	if !ok || len(intervals) != 1 {
+		t.Fatalf("StartCalendarInterval = %#v, want an array of one", got["StartCalendarInterval"])
 	}
-	if interval["Hour"] != 7 || interval["Minute"] != 30 {
-		t.Errorf("StartCalendarInterval = %v, want 7:30", interval)
+	first, ok := intervals[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the first interval is %#v", intervals[0])
+	}
+	if first["Hour"] != 7 || first["Minute"] != 30 {
+		t.Errorf("the first interval = %v, want 7:30", first)
 	}
 
 	env, ok := got["EnvironmentVariables"].(map[string]any)
@@ -75,10 +78,11 @@ func TestPlistRejectsInputsThatWouldFailSilently(t *testing.T) {
 	cases := map[string]func(*Job){
 		"no binary":       func(j *Job) { j.Binary = "" },
 		"relative binary": func(j *Job) { j.Binary = "love" },
-		"hour too large":  func(j *Job) { j.Hour = 24 },
-		"hour negative":   func(j *Job) { j.Hour = -1 },
-		"minute too big":  func(j *Job) { j.Minute = 60 },
-		"minute negative": func(j *Job) { j.Minute = -1 },
+		"no times":        func(j *Job) { j.Times = nil },
+		"hour too large":  func(j *Job) { j.Times = []TimeOfDay{{Hour: 24}} },
+		"hour negative":   func(j *Job) { j.Times = []TimeOfDay{{Hour: -1}} },
+		"minute too big":  func(j *Job) { j.Times = []TimeOfDay{{Minute: 60}} },
+		"minute negative": func(j *Job) { j.Times = []TimeOfDay{{Minute: -1}} },
 	}
 	for name, mutate := range cases {
 		job := testJob()
@@ -279,6 +283,66 @@ func readText(t *testing.T, dec *xml.Decoder) string {
 			b.Write(element)
 		case xml.EndElement:
 			return b.String()
+		}
+	}
+}
+
+// Three sends a day are one job with three intervals, not three agents: they
+// would otherwise all write the same log and would have to be removed
+// separately.
+func TestPlistCarriesEveryRunTime(t *testing.T) {
+	job := testJob()
+	job.Times = []TimeOfDay{{Hour: 7, Minute: 30}, {Hour: 12, Minute: 30}, {Hour: 20, Minute: 30}}
+
+	raw, err := job.Plist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := parsePlist(t, raw)
+
+	intervals, ok := got["StartCalendarInterval"].([]any)
+	if !ok {
+		t.Fatalf("StartCalendarInterval = %#v, want an array", got["StartCalendarInterval"])
+	}
+	if len(intervals) != 3 {
+		t.Fatalf("got %d intervals, want 3", len(intervals))
+	}
+
+	want := []TimeOfDay{{7, 30}, {12, 30}, {20, 30}}
+	for i, entry := range intervals {
+		interval, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("interval %d is %#v", i, entry)
+		}
+		if interval["Hour"] != want[i].Hour || interval["Minute"] != want[i].Minute {
+			t.Errorf("interval %d = %v, want %s", i, interval, want[i])
+		}
+	}
+}
+
+// A single time still renders as an array, so there is one shape rather than
+// two code paths that could disagree.
+func TestPlistAlwaysUsesAnArray(t *testing.T) {
+	raw, err := testJob().Plist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "<key>StartCalendarInterval</key>\n\t<array>") {
+		t.Error("a single time should still be an array of one")
+	}
+}
+
+func TestTimeOfDayString(t *testing.T) {
+	for _, tc := range []struct {
+		time TimeOfDay
+		want string
+	}{
+		{TimeOfDay{7, 30}, "07:30"},
+		{TimeOfDay{0, 0}, "00:00"},
+		{TimeOfDay{20, 5}, "20:05"},
+	} {
+		if got := tc.time.String(); got != tc.want {
+			t.Errorf("%+v.String() = %q, want %q", tc.time, got, tc.want)
 		}
 	}
 }

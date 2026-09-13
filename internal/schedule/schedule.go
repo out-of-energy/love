@@ -25,6 +25,20 @@ import (
 // another vendor's agent on the same machine.
 const Label = "dev.love.daily"
 
+// TimeOfDay is one scheduled run.
+type TimeOfDay struct {
+	Hour   int
+	Minute int
+}
+
+// String renders the time as HH:MM.
+func (t TimeOfDay) String() string { return fmt.Sprintf("%02d:%02d", t.Hour, t.Minute) }
+
+// Valid reports whether the time is a real clock time.
+func (t TimeOfDay) Valid() bool {
+	return t.Hour >= 0 && t.Hour <= 23 && t.Minute >= 0 && t.Minute <= 59
+}
+
 // Job is the launch agent to install.
 type Job struct {
 	// Binary is the absolute path to the love executable. launchd consults no
@@ -32,8 +46,10 @@ type Job struct {
 	// reads.
 	Binary string
 
-	Hour   int
-	Minute int
+	// Times are the daily runs. launchd expresses more than one as an array of
+	// intervals, which is what makes a thrice-daily push a configuration rather
+	// than three separate agents.
+	Times []TimeOfDay
 
 	// Env is passed to the run. It must hold paths to credential files, never
 	// credentials themselves: a property list is readable by anything running
@@ -52,8 +68,13 @@ func (j Job) Plist() ([]byte, error) {
 	if !filepath.IsAbs(j.Binary) {
 		return nil, fmt.Errorf("the executable path must be absolute, got %q", j.Binary)
 	}
-	if j.Hour < 0 || j.Hour > 23 || j.Minute < 0 || j.Minute > 59 {
-		return nil, fmt.Errorf("invalid time %02d:%02d", j.Hour, j.Minute)
+	if len(j.Times) == 0 {
+		return nil, errors.New("at least one run time is required")
+	}
+	for _, t := range j.Times {
+		if !t.Valid() {
+			return nil, fmt.Errorf("invalid time %02d:%02d", t.Hour, t.Minute)
+		}
 	}
 
 	var b strings.Builder
@@ -70,11 +91,17 @@ func (j Job) Plist() ([]byte, error) {
 	writeElement(&b, 2, "string", "--daily")
 	writeClose(&b, 1, "array")
 
+	// Always an array, even for a single time: one shape is one code path, and
+	// launchd accepts a one-element array everywhere it accepts a bare dict.
 	writeKey(&b, 1, "StartCalendarInterval")
-	writeOpen(&b, 1, "dict")
-	writeInteger(&b, 2, "Hour", j.Hour)
-	writeInteger(&b, 2, "Minute", j.Minute)
-	writeClose(&b, 1, "dict")
+	writeOpen(&b, 1, "array")
+	for _, t := range j.Times {
+		writeOpen(&b, 2, "dict")
+		writeInteger(&b, 3, "Hour", t.Hour)
+		writeInteger(&b, 3, "Minute", t.Minute)
+		writeClose(&b, 2, "dict")
+	}
+	writeClose(&b, 1, "array")
 
 	if len(j.Env) > 0 {
 		writeKey(&b, 1, "EnvironmentVariables")

@@ -46,6 +46,8 @@ Add that line to `~/.zshrc` or `~/.bashrc` to make it permanent.
 
 ```bash
 love <word>          # look a word up
+love --review        # work through today's review
+love --daily         # build and send today's email
 love --help
 love --version
 ```
@@ -59,6 +61,27 @@ love "ice cream"
 
 Input is normalized before lookup — trimmed, lowercased, and internal spacing
 collapsed — so `love EVIL` finds the entry stored for `evil`.
+
+### Why actions are flags
+
+`love <word>` accepts any word at all, and words are an open set that cannot be
+enumerated. A subcommand named `review` would make that word permanently
+unlookupable, and every future subcommand would consume another word — which is
+exactly what happened: `love review` used to look up the word "review", write it
+to the word file, and cost an API call.
+
+So the two grammars are kept disjoint. `love maintain` is always a lookup;
+`love --review` is always the action; `love --review maintain` is a usage error
+rather than a guess. The same shape is what `tar` (`-c`/`-t`/`-x`), `emerge`,
+and `pacman` (`-S`/`-R`/`-Q`) use, for the same reason. See
+`docs/cli-design.md` for the research behind the decision.
+
+### Daily options
+
+```bash
+love --daily --dry-run              # render the digest, send nothing
+love --daily --out /tmp/today.html  # also write the HTML
+```
 
 ## Output
 
@@ -109,13 +132,19 @@ One JSON object per line, eight fields, nothing else:
 {"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
 ```
 
-The word file is one of three that live under the store directory:
+The store is four files under the store directory:
 
-| File | Role |
-|---|---|
-| `words.jsonl` | your words |
-| `reviews.jsonl` | your learning history, append-only |
-| `memory.json` | derived state, rebuildable from the two above |
+| File | Role | Rebuildable |
+|---|---|---|
+| `words.jsonl` | your words | ❌ an asset |
+| `reviews.jsonl` | your learning history, append-only | ❌ the only history |
+| `memory.json` | derived scheduling state | ✅ from the two above |
+| `generated.jsonl` | cached example sentences and dialogue | ✅ costs one API call |
+
+The split matters. `words.jsonl` holds the anchor layer — IPA, the child-simple
+explanation, one Chinese meaning — and it is never regenerated, because memory
+depends on a stable cue. `generated.jsonl` holds the expansion layer, which is
+only practice material and is free to be rebuilt.
 
 `id` and `normalized` exist so a word has a stable identity and a single
 comparison key. `normalized` is stored rather than recomputed, so a future
@@ -205,10 +234,22 @@ env -u DEEPSEEK_API_KEY love curious
 
 ## Roadmap
 
-Shipped (M1): `love <word>`, `--help`, `--version`.
+The project grew from a dictionary into a memory engine, so the plan lives in
+`docs/` rather than in the original `REQUIREMENTS.md`. Status:
 
-Planned (M2): `--json`, `show`, `list`, `stats`, `path`, `config`, `--refresh`,
-`--no-cache`. Planned (M3): `import`, `rm`, `export`. See `REQUIREMENTS.md`.
+| Milestone | What | State |
+|---|---|---|
+| M1 | the store: four files, atomic writes, migration from the four-field format | ✅ |
+| M2 | the scheduler: Leitner boxes, the daily budget, a fake clock | ✅ |
+| M3 | `--review`: recall first, anchor as the answer, expansion behind `e` | ✅ |
+| M4 | the expansion layer: generated, validated, cached | ✅ |
+| M5 | `--daily`: generate, render, send | ✅ |
+| | `--stats`, `--export` | planned |
+| | a Reminders adapter, and a launchd job to run `--daily` each morning | planned |
+
+`docs/v0.3-review.md` holds the current design review and the milestone detail;
+`docs/cli-design.md` explains the command grammar; `docs/content-layers.md`
+explains why there are two layers.
 
 ## Note on the name
 

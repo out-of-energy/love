@@ -138,14 +138,14 @@ v0.3 §14 的 AI 契约只有 `example` 和 `scene`，没有对话。而"活用"
 终端复习同样遵循"先认得、后活用"：
 
 ```
-$ love review
+$ love --review
 
 1 / 5
 
   maintain
-  What does it mean?
+  记得它的意思吗？
 
-  [Enter 揭示]
+  [回车揭示]
 
   ── 第一部分 ──────────────────
   maintain  /meɪnˈteɪn/
@@ -154,8 +154,8 @@ $ love review
 
   ── 第二部分 ──────────────────  [按 e 展开]
   · I maintain my bicycle every month.
-  A: Your bike still looks new.
-  B: I maintain it every month.
+  A  Your bike still looks new.
+  B  I maintain it every month.
 
   Rating:  1 Again   2 Hard   3 Good   4 Easy
   >

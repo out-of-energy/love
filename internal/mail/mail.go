@@ -124,7 +124,7 @@ func RenderText(d Digest) (string, error) {
 		}
 	}
 
-	b.WriteString("\n回到电脑后运行 love review 完成今天的复习。\n")
+	b.WriteString("\n回到电脑后运行 love --review 完成今天的复习。\n")
 	b.WriteString("邮件只做提醒；评分在本地完成，词库始终在你自己机器上。\n")
 	return b.String(), nil
 }

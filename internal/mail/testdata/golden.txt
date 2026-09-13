@@ -24,5 +24,5 @@ fragile  /ˈfrædʒaɪl/
 ELI5: Easily broken. Be careful with it.
 中文：易碎的
 
-回到电脑后运行 love review 完成今天的复习。
+回到电脑后运行 love --review 完成今天的复习。
 邮件只做提醒；评分在本地完成，词库始终在你自己机器上。

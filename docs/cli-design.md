@@ -143,18 +143,28 @@ love --export out/    # 导出备份
 
 这样以后每加一个动作，测试会强制你面对冲突——而不是等用户在终端里踩到。
 
-### ② 命中歧义时明确报错并给出两条路
+### ② 边界情况必须明确，不能靠猜
+
+选 B 之后不存在"歧义"——两条语法不相交。实际实现的三种边界，都由解析器直接拒绝而不是猜：
 
 ```
-$ love review
-love: "review" 是动作名，未按单词查询。
+$ love review                 # 合法：就是一个单词
+review /rɪˈvjuː/
+ELI5: To look at something again.
 
-  想复习：     love --review
-  想查这个词： love add review        ← 或 love -- review
+$ love --review maintain      # 两条语法同时出现
+love: --review 不接受单词参数
+
+$ love --nope                 # 未知 flag，列出可用项
+love: unknown option "--nope"
+可用的动作:
+  --review     开始今天的复习
+  --daily      生成今天的邮件并发送
 ```
 
 来自 clig.dev：**"The user is conversing with your software… At worst, it's a hostile conversation
-which makes them feel stupid and resentful."** 静默猜一个，是hostile 的那种。
+which makes them feel stupid and resentful."** 静默猜一个，就是 hostile 的那种——而 `love review`
+当初静默地当成查词，正是这个问题。
 
 ---
 

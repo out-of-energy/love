@@ -216,10 +216,34 @@ func TestTextVersionCarriesBothLayers(t *testing.T) {
 		"I maintain my bicycle every month.",
 		"A  Your bike still looks new.",
 		"fragile",
-		"love review",
+		"love --review",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text version is missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// The footer tells the reader what to run next, so it has to name the command
+// that exists. It said "love review" for a while after the action moved to a
+// flag, which would have sent every reader to the wrong place — and to a paid
+// word lookup.
+func TestTheFooterNamesTheRealCommand(t *testing.T) {
+	html, err := RenderHTML(fixedDigest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := RenderText(fixedDigest())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, body := range map[string]string{"html": html, "text": text} {
+		if !strings.Contains(body, "love --review") {
+			t.Errorf("%s footer does not name the review action", name)
+		}
+		if strings.Contains(body, "love review") {
+			t.Errorf("%s footer still uses the old subcommand spelling", name)
 		}
 	}
 }

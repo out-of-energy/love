@@ -3,6 +3,16 @@
 > 原始想法：*"命令行单词词典。需要 DeepSeek token key 放在系统 OS 环境变量，默认用最快最便宜的模型。"*
 > 本文把这句话展开成可执行、可验收的工程需求。
 
+> ⚠️ **这是最初的词典 CLI 需求书，已被后续规划取代。**
+> 项目后来从"词典"长成"记忆引擎"，当前设计与里程碑在
+> [`docs/v0.3-review.md`](docs/v0.3-review.md)；命令语法见 [`docs/cli-design.md`](docs/cli-design.md)；
+> 两层内容模型见 [`docs/content-layers.md`](docs/content-layers.md)。
+>
+> 本文中仍然有效的部分：查词流程、词库格式与去重、退出码、测试方法。
+> **已失效的部分**：§8 里程碑与 §11 之后的 M2/M3 计划（`--json`、`show`、`list`、`stats`、
+> `path`、`config`、`--refresh`、`--no-cache`、`import`、`rm`、`export` 这一串）。
+> 命令名也从 `ewh` 定为 `love`。历史保留，便于回看当时的取舍。
+
 ---
 
 ## 1. 背景与目标

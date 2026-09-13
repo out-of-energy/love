@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kk/love/internal/cache"
-	"github.com/kk/love/internal/dict"
-	"github.com/kk/love/internal/render"
+	"github.com/out-of-energy/love/internal/cache"
+	"github.com/out-of-energy/love/internal/dict"
+	"github.com/out-of-energy/love/internal/render"
 )
 
 // version is a var so release builds can override it with

@@ -27,7 +27,7 @@ backup-able and hand-editable — it belongs to you, not to the tool.
 Requires Go 1.26+.
 
 ```bash
-go install github.com/kk/love@latest   # or:
+go install github.com/out-of-energy/love@latest   # or:
 go build -trimpath -ldflags "-s -w" -o /opt/homebrew/bin/love .
 ```
 

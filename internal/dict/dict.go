@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kk/love/internal/cache"
+	"github.com/out-of-energy/love/internal/cache"
 )
 
 // DefaultBaseURL is the OpenAI-compatible DeepSeek endpoint.

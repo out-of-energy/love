@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kk/love/internal/cache"
+	"github.com/out-of-energy/love/internal/cache"
 )
 
 func TestRecordKeepsTheAgreedShape(t *testing.T) {

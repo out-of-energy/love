@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kk/love/internal/cache"
+	"github.com/out-of-energy/love/internal/cache"
 )
 
 // IsTerminal reports whether f is an interactive terminal. Color is only used

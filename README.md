@@ -31,16 +31,25 @@ go install github.com/out-of-energy/love@latest   # or:
 go build -trimpath -ldflags "-s -w" -o /opt/homebrew/bin/love .
 ```
 
+`@latest` resolves to the newest **tagged** release. Check which one you got
+with `love --version`, and use `@main` if you want the tip of the branch rather
+than the last release.
+
 ## Setup
 
-The API key is read from the environment only. It is never written to disk,
-never logged, and never printed.
+The API key is read from the environment, or from a file. It is never written
+to the store, never logged, and never printed.
 
 ```bash
-export DEEPSEEK_API_KEY="sk-..."
+export DEEPSEEK_API_KEY="sk-..."          # simplest
+
+# or, preferred once the daily run is scheduled: a launch agent inherits no
+# shell profile, so a scheduled run needs a file
+printf '%s' "sk-..." > ~/.ewh/deepseek-key && chmod 600 ~/.ewh/deepseek-key
+export DEEPSEEK_API_KEY_FILE=~/.ewh/deepseek-key
 ```
 
-Add that line to `~/.zshrc` or `~/.bashrc` to make it permanent.
+Add those lines to `~/.zshrc` or `~/.bashrc` to make them permanent.
 
 ## Usage
 
@@ -83,6 +92,68 @@ love --daily --dry-run              # render the digest, send nothing
 love --daily --out /tmp/today.html  # also write the HTML
 ```
 
+## The daily email
+
+This is the point of the whole thing: an email that arrives on its own so the
+words can be read from a phone, away from the computer. Rating still happens at
+the computer — the email carries the material, `love --review` records what you
+remembered.
+
+`--daily` plans the day, generates practice material for any word that lacks it,
+renders the digest, and sends it.
+
+### Sending
+
+The mail settings are read from the environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SMTP_HOST` | `smtp.qq.com` | mail server |
+| `SMTP_PORT` | `465` | implicit TLS |
+| `SMTP_USER` | — | the account; used as sender and default recipient |
+| `SMTP_PASSWORD_FILE` | — | **preferred**: path to a file holding the password |
+| `QQ_SMTP_AUTH_CODE` | — | the authorization code, if no file is given |
+| `LOVE_MAIL_TO` | `SMTP_USER` | recipient |
+
+QQ Mail does not accept the account password over SMTP. It requires a 16-digit
+authorization code, generated in the web UI under 设置 → 账户 →
+"POP3/IMAP/SMTP服务" → 生成授权码.
+
+```bash
+printf '%s' 'your-16-digit-code' > ~/.ewh/smtp-password && chmod 600 ~/.ewh/smtp-password
+export SMTP_USER=you@qq.com
+export SMTP_PASSWORD_FILE=~/.ewh/smtp-password
+love --daily --dry-run     # check the content first
+love --daily               # then send one
+```
+
+### Scheduling it
+
+```bash
+love --install-schedule --at 07:30,12:30,20:30
+love --install-schedule --now      # install and fire once, to prove it works
+love --uninstall-schedule
+```
+
+This writes a launch agent to `~/Library/LaunchAgents/dev.love.daily.plist` and
+loads it. There is no daemon: a job that runs once a day does not justify a
+resident process, and a daemon that happens not to be running at the scheduled
+minute does nothing at all, silently. launchd also runs the job after the laptop
+wakes, so a missed morning is not a missed day.
+
+**The installer refuses to put a secret in the property list.** A plist is
+readable by anything running as the user and `launchctl print` reproduces it in
+full, so only paths are recorded — `SMTP_PASSWORD_FILE` and
+`DEEPSEEK_API_KEY_FILE`. Given an inline secret it fails, explains how to create
+the file, and does not echo the secret back.
+
+Output goes to `~/.ewh/logs/daily.log` and `daily.err`. If a morning ever passes
+without an email, those two files are the first place to look.
+
+> Multiple times send the **same digest**: it is built from the day's plan, and
+> the plan only changes when a review is graded. Three sends are three
+> opportunities to read the same material, not three different lessons.
+
 ## Output
 
 Exactly three lines, always:
@@ -103,12 +174,15 @@ set, output is plain text.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DEEPSEEK_API_KEY` | — | **Required.** Your DeepSeek API key. |
+| `DEEPSEEK_API_KEY` | — | Your DeepSeek API key. Required for a new word. |
+| `DEEPSEEK_API_KEY_FILE` | — | Path to a file holding the key; preferred, and takes precedence. |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | API base URL. |
 | `EWH_DIR` | `~/.ewh` | Directory holding the store. |
 | `EWH_CACHE` | — | Words file path, kept for backwards compatibility. |
 | `EWH_MODEL` | `deepseek-v4-flash` | Model id. |
 | `NO_COLOR` | — | Disable colored output when set. |
+
+The mail settings are listed under [The daily email](#the-daily-email).
 
 The default model is the fastest and cheapest one, because a single word lookup
 does not need more. Reasoning is switched off for the same reason: reasoning
@@ -250,6 +324,13 @@ The project grew from a dictionary into a memory engine, so the plan lives in
 `docs/v0.3-review.md` holds the current design review and the milestone detail;
 `docs/cli-design.md` explains the command grammar; `docs/content-layers.md`
 explains why there are two layers.
+
+Two earlier documents are kept as history rather than as guidance, because they
+record what was proposed and what was wrong with it:
+`docs/memory-engine-assessment.md` (the v0.1 specification) and
+`docs/v0.2-review.md` (the v0.2 specification). The syntax they quote —
+`love review`, `love daily` — is not today's; that is the point of
+`docs/cli-design.md`.
 
 ## Note on the name
 

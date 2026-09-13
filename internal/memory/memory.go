@@ -2,10 +2,16 @@
 // when a word comes back, and the daily budget that decides how much is asked
 // of the learner.
 //
-// Nothing in this package reads the clock, the disk, or the network. Time
-// arrives through a Clock and everything else is plain data. That is what makes
-// a simulated year of learning run in milliseconds, and it is the only reason
-// the acceptance tests in the specification can exist at all.
+// Nothing in this package reads the clock, the disk, or the network. Every
+// entry point takes the current time as an argument and everything else is
+// plain data, so the caller decides what "now" means and the same input always
+// produces the same answer. Clock and FakeClock exist for the test that drives
+// the scheduler forward; production code passes time in explicitly, which is
+// simpler and equally deterministic.
+//
+// That determinism is what lets a simulated year of learning run in
+// milliseconds, and it is the only reason the acceptance tests in the
+// specification can exist at all.
 package memory
 
 import "time"

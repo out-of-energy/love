@@ -286,7 +286,7 @@ MVP 阶段的实现**已包含**：规范化（含短语）、JSONL 容错读取
 | 单元测试（cache / dict / render / main） | ✅ 全绿，`-race` 通过 |
 | 覆盖率 | main 65%、cache 75%、dict 87%、render 50% |
 | 端到端（本地 mock API 驱动真实二进制，19 项断言） | ✅ 全部通过 |
-| 二进制安装 | ✅ `/opt/homebrew/bin/love` (v0.1.0) |
+| 二进制安装 | ✅ `/opt/homebrew/bin/love`（当时 v0.1.0，现已到 v0.3.0） |
 | 旧 skill 词库迁移 | ✅ 8 个词 → `~/.ewh/words.jsonl`，去重后 8 条 |
 | **真实 DeepSeek API 验证** | ✅ 完成（2026-09-13） |
 

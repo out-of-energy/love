@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -45,6 +46,13 @@ type Word struct {
 	// whose split came from a model is exactly the one worth revisiting when
 	// the data improves.
 	PartsSource string `json:"parts_source,omitempty"`
+
+	// PhonicsSource records the same thing for the sound line: "model", or
+	// "dictionary" when a pronunciation dictionary supplied the IPA and the
+	// syllable boundaries. The two are separate because they are repaired
+	// separately — a dictionary can fix the sounds with no request at all,
+	// while a segmentation can only be rebuilt by asking.
+	PhonicsSource string `json:"phonics_source,omitempty"`
 
 	ELI5      string    `json:"eli5"`
 	Chinese   string    `json:"chinese"`
@@ -197,12 +205,33 @@ func (s *WordStore) Add(w Word, now time.Time) (AddResult, error) {
 	return result, err
 }
 
-// Form is the upgrade SetForm writes: the two lines a lookup could not supply,
-// plus where the segmentation came from.
+// Form is the upgrade SetForm writes: the lines a lookup could not supply, plus
+// where each of them came from. An empty field means "leave it as it is".
 type Form struct {
-	Phonics string
-	Parts   string
-	Source  string
+	IPA           string
+	Phonics       string
+	PhonicsSource string
+	Parts         string
+	Source        string
+}
+
+// apply writes the non-empty fields of form onto w.
+func (f Form) apply(w *Word) {
+	if f.IPA != "" {
+		w.IPA = f.IPA
+	}
+	if f.Phonics != "" {
+		w.Phonics = f.Phonics
+	}
+	if f.PhonicsSource != "" {
+		w.PhonicsSource = f.PhonicsSource
+	}
+	if f.Parts != "" {
+		w.Parts = f.Parts
+	}
+	if f.Source != "" {
+		w.PartsSource = f.Source
+	}
 }
 
 // SetForm fills the form layer of an existing record, in place.
@@ -232,18 +261,7 @@ func (s *WordStore) SetForm(key string, form Form) (Word, error) {
 			if words[i].Normalized != key {
 				continue
 			}
-			// An empty field means "leave it alone". That is what lets a
-			// re-check of the segmentation rewrite the parts without
-			// regenerating a phonics line that was already fine.
-			if form.Phonics != "" {
-				words[i].Phonics = form.Phonics
-			}
-			if form.Parts != "" {
-				words[i].Parts = form.Parts
-			}
-			if form.Source != "" {
-				words[i].PartsSource = form.Source
-			}
+			form.apply(&words[i])
 			updated = words[i]
 			return s.Rewrite(words)
 		}
@@ -253,6 +271,54 @@ func (s *WordStore) SetForm(key string, form Form) (Word, error) {
 		return Word{}, err
 	}
 	return updated, nil
+}
+
+// SetForms applies several upgrades in one pass over the file.
+//
+// A dictionary repair touches every word it can, and rewriting the whole file
+// once per word would make that quadratic in the size of the store. The keys are
+// normalized words; unknown keys are reported rather than ignored silently.
+func (s *WordStore) SetForms(forms map[string]Form) (int, []string, error) {
+	if len(forms) == 0 {
+		return 0, nil, nil
+	}
+
+	changed := 0
+	var missing []string
+	err := withLock(s.path, 30*time.Second, func() error {
+		words, warnings, err := s.Load()
+		if err != nil {
+			return err
+		}
+		if len(warnings) > 0 {
+			return fmt.Errorf("%s has %d damaged line(s); refusing to rewrite it", s.path, len(warnings))
+		}
+		applied := make(map[string]bool, len(forms))
+		for i := range words {
+			key := Normalize(words[i].Normalized)
+			form, ok := forms[key]
+			if !ok {
+				continue
+			}
+			applied[key] = true
+			form.apply(&words[i])
+			changed++
+		}
+		for key := range forms {
+			if !applied[Normalize(key)] {
+				missing = append(missing, key)
+			}
+		}
+		sort.Strings(missing)
+		if changed == 0 {
+			return nil
+		}
+		return s.Rewrite(words)
+	})
+	if err != nil {
+		return 0, missing, err
+	}
+	return changed, missing, nil
 }
 
 // Rewrite replaces the whole file atomically, preserving order.

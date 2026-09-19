@@ -762,6 +762,156 @@ func TestBackfillDoesNotCallDataBackedWordsProvisional(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The sound layer.
+//
+// A pronunciation is the one upgrade that needs nobody's permission: the
+// dictionary already knows, so repairing a word costs a lookup rather than a
+// request. These tests pin that, because it is what makes the fix for a whole
+// dictionary free.
+// ---------------------------------------------------------------------------
+
+// writePhonics gives a temporary store a one-word pronunciation index.
+func writePhonics(t *testing.T, storeDir, rows string) {
+	t.Helper()
+	dir := filepath.Join(storeDir, "lexicon")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "phonics.tsv"), []byte(rows), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const profilingRow = "profiling\t/ˈpɹəʊfaɪlɪŋ/\t/ˈpɹəʊ|faɪ|lɪŋ/\tpro·fil·ing\tuk+moby\n"
+
+// The bug in full: the model split by letters, the dictionary splits by sound,
+// and the repair happens with no API key at all.
+func TestTheDictionaryFixesTheSoundLineWithoutARequest(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"p1","word":"profiling","normalized":"profiling",`+
+		`"ipa":"/ˈprəʊfaɪlɪŋ/",`+
+		`"phonics":"pro·fil·ing → /ˈprəʊ/ · /faɪl/ · /ɪŋ/","phonics_source":"model",`+
+		`"parts":"pro- (forward) · file (thread) · -ing (action of)","parts_source":"morphology",`+
+		`"eli5":"Watching what someone does.","chinese":"定性分析","source":"cli",`+
+		`"created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	writePhonics(t, filepath.Dir(paths.Words), profilingRow)
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
+	}
+
+	words, _, err := storage.OpenWords(paths.Words).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(words) != 1 {
+		t.Fatalf("got %d records", len(words))
+	}
+	w := words[0]
+	if w.Phonics != "pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+		t.Errorf("the sound line was not repaired: %q", w.Phonics)
+	}
+	if w.IPA != "/ˈpɹəʊfaɪlɪŋ/" {
+		t.Errorf("the ipa should come from the dictionary too: %q", w.IPA)
+	}
+	if w.PhonicsSource != "dictionary" {
+		t.Errorf("phonics_source = %q, want dictionary", w.PhonicsSource)
+	}
+	if !strings.Contains(stdout.String(), "修正") {
+		t.Errorf("the repair should be reported:\n%s", stdout.String())
+	}
+	// The rest of the record is not this pass's business.
+	if w.ELI5 != "Watching what someone does." || w.Chinese != "定性分析" || w.PartsSource != "morphology" {
+		t.Errorf("the repair touched more than the sound line: %+v", w)
+	}
+}
+
+// A second run must do nothing: the line is already what the dictionary says.
+func TestTheSoundRepairIsIdempotent(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"p1","word":"profiling","normalized":"profiling",`+
+		`"ipa":"/ˈpɹəʊfaɪlɪŋ/","phonics":"pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/",`+
+		`"phonics_source":"dictionary","parts":"x","parts_source":"morphology",`+
+		`"eli5":"e","chinese":"c","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	writePhonics(t, filepath.Dir(paths.Words), profilingRow)
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "修正") {
+		t.Errorf("nothing should have been rewritten:\n%s", stdout.String())
+	}
+}
+
+// A miss sends the constraint along with the request, so even a fresh lookup
+// prints the dictionary's syllables rather than the model's.
+func TestALookupPrefersTheDictionaryPronunciation(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writePhonics(t, filepath.Dir(paths.Words), profilingRow)
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+
+	// The model answers with the letter-split version, as it did in the wild.
+	anchor := `{"word":"profiling","ipa":"/ˈprəʊfaɪlɪŋ/",` +
+		`"phonics":"pro·fil·ing → /ˈprəʊ/ · /faɪl/ · /ɪŋ/",` +
+		`"parts":"pro- (forward) · file (thread) · -ing (action of) ⇒ \"drawing a line\"",` +
+		`"eli5":"Watching what someone does.","chinese":"定性分析"}`
+	srv, _ := fakeDeepSeek(t, anchor)
+	t.Setenv("DEEPSEEK_BASE_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"profiling"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Phonics: pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/") {
+		t.Errorf("the dictionary split should be printed:\n%s", out)
+	}
+	if strings.Contains(out, "/faɪl/") {
+		t.Errorf("the model's letter split reached the terminal:\n%s", out)
+	}
+	if !strings.Contains(out, "profiling /ˈpɹəʊfaɪlɪŋ/") {
+		t.Errorf("the ipa should be the dictionary's:\n%s", out)
+	}
+}
+
+// A fill pass writes what is missing and nothing else. The ipa is part of the
+// anchor — the thing that is supposed to stay still — so a model's fresh
+// transcription must not replace one the learner has already read.
+func TestBackfillFillsTheSoundLineWithoutChurningTheIPA(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"maintain","normalized":"maintain",`+
+		`"ipa":"/meɪnˈteɪn/","eli5":"To keep something working well.","chinese":"维护",`+
+		`"source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	srv, _ := fakeDeepSeek(t, maintainAnchor)
+	t.Setenv("DEEPSEEK_BASE_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+
+	words, _, err := storage.OpenWords(paths.Words).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if words[0].IPA != "/meɪnˈteɪn/" {
+		t.Errorf("the ipa was rewritten by a fill pass: %q", words[0].IPA)
+	}
+	if !strings.HasPrefix(words[0].Phonics, "main·tain") {
+		t.Errorf("the missing sound line should have been filled: %q", words[0].Phonics)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Scheduling.
 // ---------------------------------------------------------------------------
 

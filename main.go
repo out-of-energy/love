@@ -121,7 +121,7 @@ var options = []option{
 	{flag: "--out", usage: "把邮件 HTML 写入文件", takesValue: true},
 	{flag: "--at", usage: "运行时间，多个用逗号分隔（如 07:30,12:30,20:30）", takesValue: true},
 	{flag: "--now", usage: "安装后立刻试跑一次"},
-	{flag: "--recheck", usage: "与 --backfill 同用：用词法数据重算已有的构词"},
+	{flag: "--recheck", usage: "与 --backfill 同用：重算已不符合数据的构词（拼读每次免费校对）"},
 }
 
 // lookupAction returns the action a flag belongs to.
@@ -351,30 +351,32 @@ func lookup(a *app, word string) int {
 	defer stop()
 
 	client := dict.NewClient(apiKey, a.cfg.baseURL, a.cfg.model, a.cfg.timeout)
-	opts := morphologyOptions(a, word)
+	opts := dataOptions(a, word)
 	entry, err := client.Generate(ctx, word, opts)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "love: %v\n", err)
 		return exitAPI
 	}
+	ipa, phonics, phonicsSource := opts.ApplySound(word, entry.IPA, entry.Phonics)
 	parts, partsSource := opts.Apply(entry.Parts)
 
 	added, err := store.Add(storage.Word{
-		Word:        entry.Word,
-		IPA:         entry.IPA,
-		Phonics:     entry.Phonics,
-		Parts:       parts,
-		PartsSource: partsSource,
-		ELI5:        entry.ELI5,
-		Chinese:     entry.Chinese,
+		Word:          entry.Word,
+		IPA:           ipa,
+		Phonics:       phonics,
+		PhonicsSource: phonicsSource,
+		Parts:         parts,
+		PartsSource:   partsSource,
+		ELI5:          entry.ELI5,
+		Chinese:       entry.Chinese,
 	}, time.Now())
 	if err != nil {
 		// Never swallow a result the user already paid for, but never pretend
 		// it was remembered either.
 		render.Record(a.stdout, anchorOf(storage.Word{
 			Word:    entry.Word,
-			IPA:     entry.IPA,
-			Phonics: entry.Phonics,
+			IPA:     ipa,
+			Phonics: phonics,
 			Parts:   parts,
 			ELI5:    entry.ELI5,
 		}), a.cfg.color)
@@ -422,28 +424,41 @@ func needsResplit(lex *lexicon.Lexicon, w storage.Word) bool {
 	return true
 }
 
-// morphologyOptions translates the data layer's answer into the constraint the
-// model is given.
+// dataOptions translates the data layer's answers into the constraint the model
+// is given.
 //
 // An unknown word yields the zero Options, which is the old behaviour: no data,
 // so the model works it out alone. That is not a failure, it is the tail — and
 // the tail is why the model is still here.
-func morphologyOptions(a *app, word string) dict.Options {
+//
+// The two halves are looked up independently, because they answer different
+// questions and are repaired by different means: the morphology index says how
+// the word is built, the pronunciation index says how it sounds, and a store can
+// have one without the other.
+func dataOptions(a *app, word string) dict.Options {
 	lex := lexicon.Open(lexicon.StorePath(a.cfg.paths.Words))
-	analysis := lex.Analyze(word)
-	if !analysis.Known {
-		return dict.Options{}
-	}
-	opts := dict.Options{Known: true}
-	if analysis.FromOverride {
-		opts.Source = "override"
-	}
-	for _, candidate := range analysis.Candidates {
-		segments := make([]dict.Segment, 0, len(candidate.Parts))
-		for _, part := range candidate.Parts {
-			segments = append(segments, dict.Segment{Form: part.Form, Kind: part.Kind, Gloss: part.Gloss})
+
+	var opts dict.Options
+	if analysis := lex.Analyze(word); analysis.Known {
+		opts.Known = true
+		if analysis.FromOverride {
+			opts.Source = "override"
 		}
-		opts.Segments = append(opts.Segments, segments)
+		for _, candidate := range analysis.Candidates {
+			segments := make([]dict.Segment, 0, len(candidate.Parts))
+			for _, part := range candidate.Parts {
+				segments = append(segments, dict.Segment{Form: part.Form, Kind: part.Kind, Gloss: part.Gloss})
+			}
+			opts.Segments = append(opts.Segments, segments)
+		}
+	}
+	if p, ok := lex.Pronounce(word); ok {
+		opts.Sound = &dict.Sound{
+			IPA:            p.IPA,
+			SoundChunks:    p.SoundChunks,
+			SpellingChunks: p.SpellingChunks,
+			Source:         p.Source,
+		}
 	}
 	return opts
 }
@@ -650,7 +665,7 @@ func runDaily(a *app) int {
 		}
 	}
 	if len(needForm) > 0 && deepSeekKey() != "" {
-		stats := backfillForm(a, byID, needForm, false)
+		stats := backfillForm(a, byID, needForm)
 		for _, failure := range stats.Failures {
 			fmt.Fprintf(a.stderr, "love: warning: %s\n", failure)
 		}
@@ -744,13 +759,26 @@ func runBackfill(a *app) int {
 		return exitError
 	}
 
-	if !lexicon.Open(lexicon.StorePath(a.cfg.paths.Words)).Available() {
-		fmt.Fprintln(a.stderr, "love: 未找到词法数据层，构词仍由模型生成")
-		fmt.Fprintln(a.stderr, "      构建：python3 scripts/build_morphology.py")
+	lex := lexicon.Open(lexicon.StorePath(a.cfg.paths.Words))
+	if !lex.Available() && !lex.PhonicsAvailable() {
+		fmt.Fprintln(a.stderr, "love: 未找到数据层，构词与拼读仍由模型生成")
+		fmt.Fprintln(a.stderr, "      构建：python3 scripts/build_morphology.py && python3 scripts/build_phonics.py")
+	}
+
+	// The sounds are repaired first, and for every word, because a dictionary
+	// lookup costs nothing: no request, no key, no spend. That is what lets a
+	// whole dictionary of existing records have its syllable boundaries fixed
+	// at once — including on a machine with no API key at all.
+	if repaired, repairErr := repairPhonics(a, lex, words); repairErr != nil {
+		fmt.Fprintf(a.stderr, "love: warning: %v\n", repairErr)
+	} else if repaired > 0 {
+		fmt.Fprintf(a.stdout, "按词典修正了 %d 个词的音标与音节切分。\n", repaired)
+		if reloaded, _, reloadErr := storage.OpenWords(a.cfg.paths.Words).Load(); reloadErr == nil {
+			words = reloaded
+		}
 	}
 
 	recheck := a.cmd.has("--recheck")
-	lex := lexicon.Open(lexicon.StorePath(a.cfg.paths.Words))
 	byID := make(map[string]storage.Word, len(words))
 	var missing []string
 	for _, w := range words {
@@ -784,7 +812,7 @@ func runBackfill(a *app) int {
 	}
 	fmt.Fprintf(a.stdout, "%d 个词%s。\n", len(missing), action)
 
-	stats := backfillForm(a, byID, missing, recheck)
+	stats := backfillForm(a, byID, missing)
 	for _, failure := range stats.Failures {
 		fmt.Fprintf(a.stderr, "love: warning: %s\n", failure)
 	}
@@ -795,6 +823,54 @@ func runBackfill(a *app) int {
 		return exitAPI
 	}
 	return exitOK
+}
+
+// repairPhonics rewrites the sound lines a pronunciation dictionary can improve,
+// without spending a single request.
+//
+// It exists because the two halves of the data layer have different costs. A
+// segmentation that is missing or stale can only be rebuilt by asking a model,
+// so that stays behind --recheck and a key. A pronunciation is a lookup: the
+// dictionary already knows, the only question is whether what is stored differs
+// from what it says. So this runs unconditionally, over every word, and it is
+// what turned "profiling → /faɪl/ · /ɪŋ/" into "/faɪ/ · /lɪŋ/" for the whole
+// store in one pass with no API calls.
+func repairPhonics(a *app, lex *lexicon.Lexicon, words []storage.Word) (int, error) {
+	if !lex.PhonicsAvailable() {
+		return 0, nil
+	}
+
+	forms := make(map[string]storage.Form)
+	for _, w := range words {
+		p, ok := lex.Pronounce(w.Word)
+		if !ok {
+			continue
+		}
+		// The existing line is passed in so the spelling side can be kept: the
+		// model's chunking of the letters was never the mistake.
+		_, line, _ := dict.Options{Sound: &dict.Sound{
+			IPA:            p.IPA,
+			SoundChunks:    p.SoundChunks,
+			SpellingChunks: p.SpellingChunks,
+			Source:         p.Source,
+		}}.ApplySound(w.Word, w.IPA, w.Phonics)
+		if w.IPA == p.IPA && w.Phonics == line && w.PhonicsSource == "dictionary" {
+			continue
+		}
+		forms[w.Normalized] = storage.Form{IPA: p.IPA, Phonics: line, PhonicsSource: "dictionary"}
+	}
+	if len(forms) == 0 {
+		return 0, nil
+	}
+
+	changed, missing, err := storage.OpenWords(a.cfg.paths.Words).SetForms(forms)
+	if err != nil {
+		return 0, err
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(a.stderr, "love: warning: %d 条记录在修正过程中消失\n", len(missing))
+	}
+	return changed, nil
 }
 
 // printProvisional names the words whose segmentation only a model has ever had
@@ -842,9 +918,8 @@ type backfillStats struct {
 //
 // Only the missing fields are written. The anchor is a user asset, and an
 // upgrade has no business rewriting an explanation the learner has already read
-// a hundred times. In partsOnly mode the phonics line is left exactly as it is,
-// so re-checking a segmentation never churns a line that was already right.
-func backfillForm(a *app, byID map[string]storage.Word, ids []string, partsOnly bool) backfillStats {
+// a hundred times — or an ipa line, or a phonics line, that is already there.
+func backfillForm(a *app, byID map[string]storage.Word, ids []string) backfillStats {
 	apiKey := deepSeekKey()
 	if apiKey == "" {
 		return backfillStats{Failures: []string{"DEEPSEEK_API_KEY is not set"}}
@@ -867,7 +942,7 @@ func backfillForm(a *app, byID map[string]storage.Word, ids []string, partsOnly 
 			fmt.Fprintf(a.stderr, "\r  %d/%d 补齐拼读与构词…", i+1, len(ids))
 		}
 
-		opts := morphologyOptions(a, w.Word)
+		opts := dataOptions(a, w.Word)
 		entry, err := client.Generate(ctx, w.Word, opts)
 		if err != nil {
 			stats.Failures = append(stats.Failures, fmt.Sprintf("%s: %v", w.Word, err))
@@ -875,8 +950,18 @@ func backfillForm(a *app, byID map[string]storage.Word, ids []string, partsOnly 
 		}
 		parts, source := opts.Apply(entry.Parts)
 		form := storage.Form{Parts: parts, Source: source}
-		if !partsOnly {
-			form.Phonics = entry.Phonics
+
+		// Each field is written only when it is missing, or when a dictionary
+		// supplied it. A model's fresh wording must not replace an ipa or a
+		// phonics line the learner has already read — the anchor exists to stay
+		// still — and the free dictionary pass has already run by this point,
+		// so whatever is left here is the model's own answer.
+		ipa, phonics, phonicsSource := opts.ApplySound(w.Word, entry.IPA, entry.Phonics)
+		if w.Phonics == "" || phonicsSource == "dictionary" {
+			form.Phonics, form.PhonicsSource = phonics, phonicsSource
+		}
+		if w.IPA == "" || phonicsSource == "dictionary" {
+			form.IPA = ipa
 		}
 
 		saved, err := store.SetForm(w.Normalized, form)
@@ -1229,7 +1314,7 @@ Files (under the store directory):
   reviews.jsonl       your learning history
   memory.json         derived state, rebuildable from the two above
   generated.jsonl     cached example sentences and dialogue
-  lexicon/            morphology data: how words are really built (optional)
+  lexicon/            how words are built and how they sound (optional)
 
 Flags:
   -h, --help          show this help

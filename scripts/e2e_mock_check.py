@@ -153,7 +153,7 @@ def main():
         stored = json.loads(lines[0])
         schema = [
             "chinese", "created_at", "eli5", "id", "ipa", "normalized",
-            "parts", "parts_source", "phonics", "source", "word",
+            "parts", "parts_source", "phonics", "phonics_source", "source", "word",
         ]
         ok &= check("exactly the documented fields", sorted(stored) == schema, str(sorted(stored)))
         ok &= check("stored word is normalized", stored["word"] == "serendipity", stored.get("word", ""))

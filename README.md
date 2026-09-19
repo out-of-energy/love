@@ -215,13 +215,13 @@ tokens would only be discarded.
 
 ## The word file
 
-One JSON object per line, eleven fields, nothing else:
+One JSON object per line, twelve fields, nothing else:
 
 ```json
-{"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","phonics":"e·vil → /ˈiː/ · /vəl/","parts":"evil (bad, harmful) ⇒ \"bad, harmful\"","parts_source":"morphology","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
+{"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","phonics":"e·vil → /ˈiː/ · /vəl/","parts":"evil (bad, harmful) ⇒ \"bad, harmful\"","parts_source":"morphology","phonics_source":"dictionary","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
 ```
 
-`phonics`, `parts` and `parts_source` are omitted when a record predates them, so
+`phonics`, `parts`, `phonics_source` and `parts_source` are omitted when a record predates them, so
 a line written by an older version keeps its original bytes until something
 upgrades it.
 
@@ -236,6 +236,12 @@ makes the rest honest:
 | `morphology-compound` | the model read it as a compound of two ordinary words |
 | `morphology-declined` | the model refused every recorded analysis |
 | `morphology-forced` | the model disagreed and the data won |
+
+`phonics_source` is the same idea for the line above, and it has only two
+values: `model`, or `dictionary` when a pronunciation dictionary supplied the
+IPA and the syllable boundaries. The two are separate because they are repaired
+separately — a pronunciation can be rebuilt with no request at all, while a
+segmentation can only be re-derived by asking.
 
 The store is four files under the store directory, plus an optional data
 directory:
@@ -389,10 +395,70 @@ $ love --backfill
 Anything you check belongs in `internal/lexicon/overrides.jsonl`. An override
 outranks the data, and a re-check will not undo it.
 
+### The sound layer
+
+`parts` was not the only line a model should not have been trusted with. Asked
+for the syllables of `profiling`, it answered `/ˈprəʊ/ · /faɪl/ · /ɪŋ/`, because
+the letters put the `l` in the second chunk:
+
+```text
+model:      pro·fil·ing → /ˈprəʊ/ · /faɪl/ · /ɪŋ/
+dictionary: pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/
+```
+
+`profile` is `/ˈprəʊ.faɪl/`: the `/l/` closes that syllable only because nothing
+follows it. Add `-ing` and English hands the `/l/` to the new syllable as its
+onset. The model's version also teaches a false rule — `fil` is `/fɪl/` in
+filter, film and filth — which is exactly the kind of error a learner cannot
+detect.
+
+So the sounds come from data too:
+
+| Part | Source |
+|---|---|
+| IPA | [ipa-dict](https://github.com/open-dict-data/ipa-dict) (MIT), British list first, American as fallback — 147k words |
+| Syllable count | [Moby Hyphenator](https://www.gutenberg.org/ebooks/3204) (public domain in the US) — 160k words |
+| Spelling syllables | the same list; its real breaks, not a guess |
+| Sound chunks | computed from the dictionary's own transcription |
+
+```bash
+python3 scripts/build_phonics.py            # ~7 MB of downloads, ~7 MB of index
+python3 scripts/check_phonics.py            # accuracy against the answer key
+```
+
+The boundaries are computed, because neither source has them: ipa-dict gives a
+transcription with stress marks and no divisions, and Moby divides the spelling.
+Three rules reproduce what a dictionary prints:
+
+- **maximal onset** — the next syllable takes the longest legal cluster, which is
+  what moves the /l/ of `profiling` forward;
+- **checked vowels keep a coda** — ɪ ɛ æ ɒ ʌ ʊ cannot end a syllable, so `city` is
+  `/ˈsɪt/ · /i/` and `literally` is `/ˈlɪt/ · /ə/`, not one consonant later;
+- **the hyphenation count breaks ties the sounds cannot** — `ɪə` is one syllable
+  in `here` and two in `curious`, and only the count tells them apart.
+
+Two details of the Moby file are worth knowing if you ever rebuild it: the ebook
+page offers the package README rather than the list (the list is at
+`files/3204/files/mhyph.txt`), and its breaks are byte `0xA5`, not hyphens.
+
+Two consequences worth knowing:
+
+- **A repair costs nothing.** A pronunciation is a lookup, not a request, so
+  `love --backfill` re-checks every word's sound line every time it runs, with no
+  API key and no spend. That is what fixed a whole existing dictionary in one
+  pass.
+- **The transcription will change.** Dictionary IPA replaces the model's, so a
+  stored `/ˈprəʊfaɪlɪŋ/` becomes `/ˈpɹəʊfaɪlɪŋ/` — `ɹ` rather than `r`, and the
+  British vowel qualities. The data is the authority; if the model's looser
+  transcription is ever wanted back, it is one line in the print function.
+
 ### Measuring it
 
 `internal/lexicon/testdata/parts_gold.jsonl` is a hand-checked answer key of 56
-common words. It runs as a test, and skips when no data layer is installed:
+common words, and `phonics_gold.tsv` is the same for 59 words' syllables —
+including every case that started this work: `profiling`, `literally`,
+`curious`, `here` and `comfortable`. Both run as tests and skip when no data
+layer is installed:
 
 ```bash
 go test ./internal/lexicon -run TestGoldSet -v
@@ -401,7 +467,10 @@ go test ./internal/lexicon -run TestGoldSet -v
 The current score is **55/55 of the words the data has an opinion on** (one of
 them via a hand correction). Before the table-driven splitter existed it was
 44/55, and the misses were exactly the Greek compounds and the over-split
-familiar words.
+familiar words. The sound layer scores **59/59**, and `check_phonics.py` also
+reports how often a computed split agrees in count with the hyphenation source:
+**94.5%**, the rest being words like `comfortable`, where the spelling carries a
+syllable the pronunciation does not.
 
 ## Testing
 
@@ -475,6 +544,7 @@ The project grew from a dictionary into a memory engine, so the plan lives in
 | M5 | `--daily`: generate, render, send | ✅ |
 | M6 | the form layer: phonics and word parts, and `--backfill` to add them to older words | ✅ |
 | M7 | the morphology data layer: real segmentations, a curated affix table, and a gold set to measure them | ✅ |
+| M8 | the sound layer: IPA and syllable boundaries from a dictionary, repaired for free | ✅ |
 | | `--stats`, `--export` | planned |
 | | a Reminders adapter, and a launchd job to run `--daily` each morning | planned |
 

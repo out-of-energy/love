@@ -88,6 +88,24 @@ type Segment struct {
 	Gloss string
 }
 
+// Sound is a pronunciation supplied by the data layer.
+//
+// It is separate from Segments because the two are repaired separately: a
+// pronunciation dictionary can rebuild the sound line with no request at all,
+// while a segmentation can only be re-derived by asking.
+type Sound struct {
+	// IPA is the full transcription, slashes included.
+	IPA string
+	// SoundChunks are the syllables of IPA, each with its own slashes and with
+	// the stress mark leading the chunk.
+	SoundChunks []string
+	// SpellingChunks are the orthographic syllables, empty when the data had
+	// none.
+	SpellingChunks []string
+	// Source names the dictionary, e.g. "uk+moby".
+	Source string
+}
+
 // Options carries what the morphology data knows about the word.
 //
 // The zero value means "no data", which is the behaviour this tool had before
@@ -104,6 +122,69 @@ type Options struct {
 	// Source names where the analyses came from, and is what the caller
 	// records when the model agrees with one. It defaults to "morphology".
 	Source string
+	// Sound is the recorded pronunciation, when a dictionary has one. A nil
+	// Sound means the model writes the two sound lines as before.
+	Sound *Sound
+}
+
+// ApplySound returns the ipa and phonics lines the record should keep, and where
+// they came from.
+//
+// When the data has a pronunciation it wins outright, and unlike a segmentation
+// there is nothing to salvage from the model's version. The failure this guards
+// against is not a matter of wording: a syllable boundary in the wrong place
+// teaches a letter-to-sound rule that is false — the model read "profiling" as
+// /faɪl/ · /ɪŋ/ because the letters put the l there, while English puts that /l/
+// in the next syllable's onset.
+func (o Options) ApplySound(word, ipa, phonics string) (string, string, string) {
+	if o.Sound == nil {
+		return ipa, phonics, "model"
+	}
+	return o.Sound.IPA, renderSound(word, *o.Sound, phonics), "dictionary"
+}
+
+// renderSound builds the printed line:
+//
+//	pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/
+//
+// The orthographic side is the one part of the old line worth keeping. It is a
+// statement about spelling rather than about sound, the model's version of it
+// was never the problem, and a dictionary index without hyphenation data would
+// otherwise have to print the word whole. So it is carried over whenever it
+// already has one chunk per syllable — and dropped when it does not, because a
+// spelling split that disagrees with the sound split is worse than none.
+func renderSound(word string, s Sound, previous string) string {
+	left := word
+	switch {
+	case len(s.SpellingChunks) > 0:
+		left = strings.Join(s.SpellingChunks, "·")
+	default:
+		if side, ok := spellingSide(previous); ok && chunkCount(side) == len(s.SoundChunks) {
+			left = side
+		}
+	}
+	if len(s.SoundChunks) == 0 {
+		return left + " → " + s.IPA
+	}
+	return left + " → " + strings.Join(s.SoundChunks, " · ")
+}
+
+// spellingSide returns the part of a phonics line before the arrow.
+func spellingSide(phonics string) (string, bool) {
+	idx := strings.Index(phonics, "→")
+	if idx < 0 {
+		return "", false
+	}
+	side := strings.TrimSpace(phonics[:idx])
+	return side, side != ""
+}
+
+// chunkCount counts the chunks in a "pro·fil·ing" spelling side.
+func chunkCount(side string) int {
+	if strings.TrimSpace(side) == "" {
+		return 0
+	}
+	return strings.Count(side, "·") + 1
 }
 
 // choice returns the analyses rendered for the prompt.

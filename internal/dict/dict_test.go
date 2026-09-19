@@ -125,6 +125,49 @@ func TestEntryValidate(t *testing.T) {
 	}
 }
 
+// The orthographic side of an existing line is worth keeping: it is a statement
+// about spelling rather than about sound, and the model's chunking of the
+// letters was never the mistake. Without this, a dictionary index that has no
+// hyphenation data would have to print the word whole.
+func TestApplySoundKeepsTheSpellingSideWhenItFits(t *testing.T) {
+	opts := Options{Sound: &Sound{
+		IPA:         "/ˈpɹəʊfaɪlɪŋ/",
+		SoundChunks: []string{"/ˈpɹəʊ/", "/faɪ/", "/lɪŋ/"},
+	}}
+
+	ipa, line, source := opts.ApplySound("profiling", "/old/", "pro·fil·ing → /ˈprəʊ/ · /faɪl/ · /ɪŋ/")
+	if ipa != "/ˈpɹəʊfaɪlɪŋ/" {
+		t.Errorf("ipa = %q", ipa)
+	}
+	if line != "pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+		t.Errorf("line = %q", line)
+	}
+	if source != "dictionary" {
+		t.Errorf("source = %q", source)
+	}
+}
+
+// A spelling split that disagrees with the sound split is worse than none, so a
+// mismatched left side is dropped rather than carried along.
+func TestApplySoundDropsASpellingSideThatDoesNotFit(t *testing.T) {
+	opts := Options{Sound: &Sound{
+		IPA:         "/ˈpɹəʊfaɪlɪŋ/",
+		SoundChunks: []string{"/ˈpɹəʊ/", "/faɪ/", "/lɪŋ/"},
+	}}
+	if _, line, _ := opts.ApplySound("profiling", "", "profile → /ˈprəʊ/ · /faɪl/"); line != "profiling → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+		t.Errorf("line = %q", line)
+	}
+}
+
+// With no pronunciation data the model's two lines are what the learner gets,
+// which is how the tool behaved before this existed.
+func TestApplySoundWithoutDataChangesNothing(t *testing.T) {
+	ipa, line, source := Options{}.ApplySound("profiling", "/x/", "pro·fil·ing → /a/ · /b/")
+	if ipa != "/x/" || line != "pro·fil·ing → /a/ · /b/" || source != "model" {
+		t.Errorf("ApplySound = (%q, %q, %q)", ipa, line, source)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The morphology constraint.
 //

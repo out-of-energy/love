@@ -124,6 +124,7 @@ type Lexicon struct {
 	inflections *keysFile
 	derivations *keysFile
 	lemmas      *keysFile
+	phonics     *keysFile
 	affixes     map[string]string
 }
 
@@ -135,6 +136,7 @@ func Open(dir string) *Lexicon {
 	l.inflections = openKeys(filepath.Join(dir, "inflections.tsv"), 3)
 	l.derivations = openKeys(filepath.Join(dir, "derivations.tsv"), 4)
 	l.lemmas = openKeys(filepath.Join(dir, "lemmas.txt"), 1)
+	l.phonics = openKeys(filepath.Join(dir, "phonics.tsv"), 5)
 	return l
 }
 

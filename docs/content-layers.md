@@ -71,6 +71,22 @@ CC BY-SA 3.0，由 `scripts/build_morphology.py` 生成，默认不装也能跑�
 这套约束的效果由 `internal/lexicon/testdata/parts_gold.jsonl`（56 个人工核对过的
 常用词）衡量：`go test ./internal/lexicon -run TestGoldSet`。
 
+### 音标与拼读同样不由模型决定
+
+`ipa` 和 `phonics` 是锚点层里最后两个还完全由模型生成的行，代价是具体的：模型把
+`profiling` 切成 `/ˈprəʊ/ · /faɪl/ · /ɪŋ/`，因为字母 `l` 写在第二块里；而 `profile`
+是 `/ˈprəʊ.faɪl/`，加上 `-ing` 之后英语把这个 `/l/` 交给新音节当首音，词典标的是
+`/ˈprəʊ/ · /faɪ/ · /lɪŋ/`。照字母切的版本还会教出一条假规则——`fil` 在 filter、film、
+filth 里都是 `/fɪl/`。
+
+所以这一行也改成查表：音标与音节边界来自 ipa-dict（MIT），拼写音节来自 Moby
+Hyphenator（美国公有领域），音块由「响音核 + 最大首音」规则从词典音标切出来
+（`scripts/build_phonics.py`）。模型保留解释的职责，不再对音节边界有投票权。
+
+一个附带的好处值得记下来：**读音是可以免费修的**。切分只能靠再问一次模型，而读音只是
+一次查表，所以 `love --backfill` 每次都对所有词重校读音——不花 key、不花请求、不花时间。
+`phonics_source` 记录的正是这一点（`model` / `dictionary`）。
+
 ---
 
 ## 3. 第二部分：扩展层

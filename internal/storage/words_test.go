@@ -340,3 +340,155 @@ func TestSavedLinesHaveExactlyTheDocumentedFields(t *testing.T) {
 		t.Error("the file must end with a newline")
 	}
 }
+
+// A record that has the form layer writes it, and one that does not omits it
+// rather than storing two empty strings. That is what lets an older line keep
+// its exact bytes through a rewrite.
+func TestTheFormLayerIsWrittenWhenItExists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	store := OpenWords(path)
+	if _, err := store.Add(Word{
+		Word:    "expose",
+		IPA:     "/ɪkˈspəʊz/",
+		Phonics: "ex·pose → /ɪk/ · /ˈspəʊz/",
+		Parts:   `ex- (out) · pos (put) · -e ⇒ "put out"`,
+		ELI5:    "To show something that was hidden.",
+		Chinese: "暴露",
+	}, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	words, warnings, err := store.Load()
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Load = %v, warnings %v", err, warnings)
+	}
+	if len(words) != 1 || words[0].Phonics == "" || words[0].Parts == "" {
+		t.Fatalf("the form layer did not survive the round trip: %+v", words)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 10 {
+		t.Errorf("a complete record has 10 fields, got %d: %v", len(raw), raw)
+	}
+}
+
+func TestNeedsForm(t *testing.T) {
+	for name, tc := range map[string]struct {
+		word Word
+		want bool
+	}{
+		"complete":   {Word{Phonics: "b", Parts: "b"}, false},
+		"no phonics": {Word{Parts: "b"}, true},
+		"no parts":   {Word{Phonics: "b"}, true},
+		"neither":    {Word{}, true},
+	} {
+		if got := tc.word.NeedsForm(); got != tc.want {
+			t.Errorf("%s: NeedsForm = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// SetForm is the only write in the tool that touches a record which already
+// exists, so what it may change is exactly as important as what it changes.
+func TestSetFormFillsOnlyTheFormLayer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	store := OpenWords(path)
+	body := `{"id":"w1","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-01-02T03:04:05Z"}` + "\n" +
+		`{"id":"w2","word":"sign","normalized":"sign","ipa":"/saɪn/","eli5":"A sign.","chinese":"标志","source":"cli","created_at":"2026-01-03T03:04:05Z"}` + "\n"
+	writeFile(t, path, body)
+
+	updated, err := store.SetForm("sign", Form{
+		Phonics: "sign → /saɪn/",
+		Parts:   "no clear prefix or suffix",
+		Source:  "model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != "w2" || updated.CreatedAt.IsZero() {
+		t.Errorf("the identity fields should come back intact: %+v", updated)
+	}
+
+	words, warnings, err := store.Load()
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Load = %v, warnings %v", err, warnings)
+	}
+	if len(words) != 2 {
+		t.Fatalf("an update must not append: got %d records", len(words))
+	}
+	if words[0].Word != "evil" || words[0].Phonics != "" {
+		t.Errorf("the untouched record changed: %+v", words[0])
+	}
+	if words[1].Phonics != "sign → /saɪn/" || words[1].Parts != "no clear prefix or suffix" {
+		t.Errorf("the form layer was not written: %+v", words[1])
+	}
+	if words[1].PartsSource != "model" {
+		t.Errorf("where the segmentation came from should be recorded: %+v", words[1])
+	}
+	if words[1].IPA != "/saɪn/" || words[1].ELI5 != "A sign." || words[1].Chinese != "标志" {
+		t.Errorf("the anchor must not change: %+v", words[1])
+	}
+	if words[1].ID != "w2" || !words[1].CreatedAt.Equal(time.Date(2026, time.January, 3, 3, 4, 5, 0, time.UTC)) {
+		t.Errorf("identity or creation time changed: %+v", words[1])
+	}
+}
+
+func TestSetFormErrorsOnAnUnknownWord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	writeFile(t, path, `{"id":"w1","word":"evil","normalized":"evil","ipa":"/x/","eli5":"e","chinese":"邪恶的","source":"cli","created_at":"2026-01-02T03:04:05Z"}`+"\n")
+
+	if _, err := OpenWords(path).SetForm("absent", Form{Parts: "b"}); err == nil {
+		t.Error("setting the form of a word that is not stored should fail")
+	}
+}
+
+// An empty field means "leave it as it is". That is what lets a re-check of the
+// segmentation rewrite the parts without regenerating a phonics line that was
+// already right.
+func TestSetFormLeavesEmptyFieldsAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	store := OpenWords(path)
+	writeFile(t, path, `{"id":"w1","word":"evil","normalized":"evil","ipa":"/x/","phonics":"e·vil → /ˈiː/ · /vəl/","parts":"evil","parts_source":"model","eli5":"e","chinese":"邪恶的","source":"cli","created_at":"2026-01-02T03:04:05Z"}`+"\n")
+
+	if _, err := store.SetForm("evil", Form{Parts: "ev · il", Source: "morphology"}); err != nil {
+		t.Fatal(err)
+	}
+
+	words, _, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if words[0].Parts != "ev · il" || words[0].PartsSource != "morphology" {
+		t.Errorf("the segmentation should have been replaced: %+v", words[0])
+	}
+	if words[0].Phonics != "e·vil → /ˈiː/ · /vəl/" {
+		t.Errorf("an empty phonics must not erase the existing one: %+v", words[0])
+	}
+}
+
+// A damaged line may be the only copy of a word, so the upgrade refuses to
+// rewrite the file — exactly as Migrate does.
+func TestSetFormRefusesADamagedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	body := `{"id":"w1","word":"evil","normalized":"evil","ipa":"/x/","eli5":"e","chinese":"邪恶的","source":"cli","created_at":"2026-01-02T03:04:05Z"}` + "\n" +
+		"not json at all\n"
+	writeFile(t, path, body)
+
+	if _, err := OpenWords(path).SetForm("evil", Form{Phonics: "e·vil → /ˈiː/ · /vəl/", Parts: "no clear parts"}); err == nil {
+		t.Error("a file with a damaged line must not be rewritten")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != body {
+		t.Errorf("the file changed despite the refusal:\n%s", after)
+	}
+}

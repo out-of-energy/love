@@ -3,7 +3,8 @@
 //	love <word>          look a word up
 //	love --review        work through today's review
 //
-// The first lookup for a word asks DeepSeek for its IPA, a deliberately
+// The first lookup for a word asks DeepSeek for its IPA, how to sound it out,
+// how it is built from a prefix, a root and a suffix, a deliberately
 // child-simple English explanation, and one common Chinese meaning, then stores
 // the result in a personal word file. Every later lookup is served from that
 // file with no network request and no cost.
@@ -16,12 +17,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/out-of-energy/love/internal/ai"
 	"github.com/out-of-energy/love/internal/dict"
+	"github.com/out-of-energy/love/internal/lexicon"
 	"github.com/out-of-energy/love/internal/mail"
 	"github.com/out-of-energy/love/internal/memory"
 	"github.com/out-of-energy/love/internal/render"
@@ -32,7 +35,7 @@ import (
 
 // version is a var so release builds can override it with
 // -ldflags "-X main.version=...".
-var version = "0.3.0"
+var version = "0.4.0"
 
 // Documented exit codes. Scripts rely on these, so they are part of the
 // interface rather than an implementation detail.
@@ -83,6 +86,12 @@ var actions = []action{
 		run:   runDaily,
 	},
 	{
+		name:  "backfill",
+		flags: []string{"--backfill"},
+		usage: "为旧词补齐拼读与构词（需要 API key）",
+		run:   runBackfill,
+	},
+	{
 		name:  "install-schedule",
 		flags: []string{"--install-schedule"},
 		usage: "安装每日定时任务（launchd，默认 07:30）",
@@ -112,6 +121,7 @@ var options = []option{
 	{flag: "--out", usage: "把邮件 HTML 写入文件", takesValue: true},
 	{flag: "--at", usage: "运行时间，多个用逗号分隔（如 07:30,12:30,20:30）", takesValue: true},
 	{flag: "--now", usage: "安装后立刻试跑一次"},
+	{flag: "--recheck", usage: "与 --backfill 同用：用词法数据重算已有的构词"},
 }
 
 // lookupAction returns the action a flag belongs to.
@@ -320,19 +330,19 @@ func lookup(a *app, word string) int {
 		}
 	}
 
-	// Cache first. A hit costs nothing and must never touch the network.
+	// Cache first. A hit costs nothing and must never touch the network — not
+	// even to upgrade a record to the current schema. Filling in a missing form
+	// layer costs a request, so it belongs to the paths that already spend
+	// requests (--daily and --backfill), never here.
 	if existing, ok := storage.Find(words, word); ok {
-		render.Record(a.stdout, existing.Word, existing.IPA, existing.ELI5, existing.Chinese, a.cfg.color)
+		render.Record(a.stdout, anchorOf(existing), a.cfg.color)
 		return exitOK
 	}
 
 	// Only now, on a genuine miss, do we need a key.
 	apiKey := deepSeekKey()
 	if apiKey == "" {
-		fmt.Fprintln(a.stderr, "love: DEEPSEEK_API_KEY is not set")
-		fmt.Fprintln(a.stderr)
-		fmt.Fprintln(a.stderr, "Export it in your shell profile, then open a new terminal:")
-		fmt.Fprintln(a.stderr, `  export DEEPSEEK_API_KEY="sk-..."`)
+		explainMissingKey(a.stderr)
 		return exitUsage
 	}
 
@@ -341,29 +351,120 @@ func lookup(a *app, word string) int {
 	defer stop()
 
 	client := dict.NewClient(apiKey, a.cfg.baseURL, a.cfg.model, a.cfg.timeout)
-	entry, err := client.Generate(ctx, word)
+	opts := morphologyOptions(a, word)
+	entry, err := client.Generate(ctx, word, opts)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "love: %v\n", err)
 		return exitAPI
 	}
+	parts, partsSource := opts.Apply(entry.Parts)
 
 	added, err := store.Add(storage.Word{
-		Word:    entry.Word,
-		IPA:     entry.IPA,
-		ELI5:    entry.ELI5,
-		Chinese: entry.Chinese,
+		Word:        entry.Word,
+		IPA:         entry.IPA,
+		Phonics:     entry.Phonics,
+		Parts:       parts,
+		PartsSource: partsSource,
+		ELI5:        entry.ELI5,
+		Chinese:     entry.Chinese,
 	}, time.Now())
 	if err != nil {
 		// Never swallow a result the user already paid for, but never pretend
 		// it was remembered either.
-		render.Record(a.stdout, entry.Word, entry.IPA, entry.ELI5, entry.Chinese, a.cfg.color)
+		render.Record(a.stdout, anchorOf(storage.Word{
+			Word:    entry.Word,
+			IPA:     entry.IPA,
+			Phonics: entry.Phonics,
+			Parts:   parts,
+			ELI5:    entry.ELI5,
+		}), a.cfg.color)
 		fmt.Fprintf(a.stderr, "love: warning: result was not saved: %v\n", err)
 		return exitCacheWrite
 	}
 
-	saved := added.Word
-	render.Record(a.stdout, saved.Word, saved.IPA, saved.ELI5, saved.Chinese, a.cfg.color)
+	render.Record(a.stdout, anchorOf(added.Word), a.cfg.color)
 	return exitOK
+}
+
+// needsResplit reports whether the recorded data now disagrees with the
+// segmentation stored for w.
+//
+// This is what makes --recheck cheap enough to run often. A word whose split
+// the data already agrees with needs no request at all, so revisiting a whole
+// dictionary costs nothing until something actually changes: a rebuilt data
+// layer, a corrected table, or a hand correction added after the word was first
+// looked up. Only then does the word get looked at again.
+func needsResplit(lex *lexicon.Lexicon, w storage.Word) bool {
+	switch w.PartsSource {
+	case "morphology-compound", "morphology-declined":
+		// The data allowed this answer and the model took it — a compound, or a
+		// refusal. It will never match the data's preferred analysis, so
+		// re-asking would spend a request only to get the same answer back.
+		return false
+	}
+
+	analysis := lex.Analyze(w.Word)
+	if !analysis.Known || len(analysis.Candidates) == 0 {
+		return false
+	}
+	if w.Parts == "" {
+		return true
+	}
+	// Any recorded analysis counts as current, not just the preferred one. The
+	// model is allowed to choose among them, and a choice it was allowed to make
+	// must not read as stale — that would re-ask forever and, worse, quietly
+	// replace a correct analysis with the same answer it rejected.
+	for _, candidate := range analysis.Candidates {
+		if lexicon.SameStems(w.Parts, candidate.Forms()) {
+			return false
+		}
+	}
+	return true
+}
+
+// morphologyOptions translates the data layer's answer into the constraint the
+// model is given.
+//
+// An unknown word yields the zero Options, which is the old behaviour: no data,
+// so the model works it out alone. That is not a failure, it is the tail — and
+// the tail is why the model is still here.
+func morphologyOptions(a *app, word string) dict.Options {
+	lex := lexicon.Open(lexicon.StorePath(a.cfg.paths.Words))
+	analysis := lex.Analyze(word)
+	if !analysis.Known {
+		return dict.Options{}
+	}
+	opts := dict.Options{Known: true}
+	if analysis.FromOverride {
+		opts.Source = "override"
+	}
+	for _, candidate := range analysis.Candidates {
+		segments := make([]dict.Segment, 0, len(candidate.Parts))
+		for _, part := range candidate.Parts {
+			segments = append(segments, dict.Segment{Form: part.Form, Kind: part.Kind, Gloss: part.Gloss})
+		}
+		opts.Segments = append(opts.Segments, segments)
+	}
+	return opts
+}
+
+// anchorOf projects a stored word onto the block the terminal prints.
+func anchorOf(w storage.Word) render.Anchor {
+	return render.Anchor{
+		Word:    w.Word,
+		IPA:     w.IPA,
+		Phonics: w.Phonics,
+		Parts:   w.Parts,
+		ELI5:    w.ELI5,
+	}
+}
+
+// explainMissingKey prints the one message that says how to fix it.
+func explainMissingKey(w io.Writer) {
+	fmt.Fprintln(w, "love: DEEPSEEK_API_KEY is not set")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Export it in your shell profile, then open a new terminal:")
+	fmt.Fprintln(w, `  export DEEPSEEK_API_KEY="sk-..."`)
 }
 
 // runReview assembles a session and runs it interactively.
@@ -538,13 +639,41 @@ func runDaily(a *app) int {
 		}
 	}
 
+	// The form layer is an upgrade of records that already exist, and an upgrade
+	// costs one request per word — so it happens here, in the run that is
+	// already paying for model calls, and never in a lookup. Only the words the
+	// digest will actually show are worth filling in.
+	var needForm []string
+	for _, id := range today {
+		if w, ok := byID[id]; ok && w.NeedsForm() {
+			needForm = append(needForm, id)
+		}
+	}
+	if len(needForm) > 0 && deepSeekKey() != "" {
+		stats := backfillForm(a, byID, needForm, false)
+		for _, failure := range stats.Failures {
+			fmt.Fprintf(a.stderr, "love: warning: %s\n", failure)
+		}
+		if stats.Filled > 0 {
+			fmt.Fprintf(a.stderr, "love: 补齐了 %d 个词的拼读与构词（%d 个来自词法数据）\n",
+				stats.Filled, stats.FromData)
+		}
+	}
+
 	digest := mail.Digest{Date: now}
 	for _, id := range today {
 		w, ok := byID[id]
 		if !ok {
 			continue
 		}
-		entry := mail.Word{Word: w.Word, IPA: w.IPA, ELI5: w.ELI5, Chinese: w.Chinese}
+		entry := mail.Word{
+			Word:    w.Word,
+			IPA:     w.IPA,
+			Phonics: w.Phonics,
+			Parts:   w.Parts,
+			ELI5:    w.ELI5,
+			Chinese: w.Chinese,
+		}
 		if c, ok := content[id]; ok {
 			copied := c
 			entry.Content = &copied
@@ -592,6 +721,179 @@ func runDaily(a *app) int {
 	}
 	fmt.Fprintf(a.stdout, "已发送到 %s\n", smtp.To)
 	return exitOK
+}
+
+// runBackfill fills the form layer of every word that predates it.
+//
+// This is the one action whose whole job is an upgrade, so it is explicit
+// rather than automatic: it costs one request per word and needs a key, and the
+// user should get to decide when to spend that. A daily run fills the same gap
+// for the words it happens to show; this fills the whole file at once.
+//
+// With --recheck it also revisits words whose segmentation came from a model
+// alone, which is what makes the morphology data worth installing after the
+// fact: the data improves, the words that need it are exactly the ones marked
+// parts_source=model, and nothing else has to be regenerated.
+func runBackfill(a *app) int {
+	words, warnings, err := storage.OpenWords(a.cfg.paths.Words).Load()
+	for _, warning := range warnings {
+		fmt.Fprintf(a.stderr, "love: warning: %s\n", warning)
+	}
+	if err != nil {
+		fmt.Fprintf(a.stderr, "love: cannot read words: %v\n", err)
+		return exitError
+	}
+
+	if !lexicon.Open(lexicon.StorePath(a.cfg.paths.Words)).Available() {
+		fmt.Fprintln(a.stderr, "love: 未找到词法数据层，构词仍由模型生成")
+		fmt.Fprintln(a.stderr, "      构建：python3 scripts/build_morphology.py")
+	}
+
+	recheck := a.cmd.has("--recheck")
+	lex := lexicon.Open(lexicon.StorePath(a.cfg.paths.Words))
+	byID := make(map[string]storage.Word, len(words))
+	var missing []string
+	for _, w := range words {
+		byID[w.ID] = w
+		switch {
+		case w.NeedsForm():
+			missing = append(missing, w.ID)
+		case recheck && needsResplit(lex, w):
+			// Has both lines, but the data no longer agrees with them.
+			missing = append(missing, w.ID)
+		}
+	}
+	if len(missing) == 0 {
+		if recheck {
+			fmt.Fprintln(a.stdout, "每个词的构词都已经来自词法数据，没有需要重算的。")
+		} else {
+			fmt.Fprintln(a.stdout, "每个词都已经有拼读和构词，没有需要补齐的。")
+		}
+		printProvisional(a, byID)
+		return exitOK
+	}
+
+	if deepSeekKey() == "" {
+		explainMissingKey(a.stderr)
+		return exitUsage
+	}
+
+	action := "缺少拼读或构词，开始补齐"
+	if recheck {
+		action = "的构词需要按词法数据重算"
+	}
+	fmt.Fprintf(a.stdout, "%d 个词%s。\n", len(missing), action)
+
+	stats := backfillForm(a, byID, missing, recheck)
+	for _, failure := range stats.Failures {
+		fmt.Fprintf(a.stderr, "love: warning: %s\n", failure)
+	}
+	fmt.Fprintf(a.stdout, "已处理 %d/%d 个词，其中 %d 个的构词来自词法数据。\n",
+		stats.Filled, len(missing), stats.FromData)
+	printProvisional(a, byID)
+	if stats.Filled == 0 && len(stats.Failures) > 0 {
+		return exitAPI
+	}
+	return exitOK
+}
+
+// printProvisional names the words whose segmentation only a model has ever had
+// an opinion on.
+//
+// They are the tail: coinages, proper nouns, typos, and anything nobody has
+// written an etymology for. Nothing in this tool can verify them — a second
+// opinion would only produce another unverifiable answer — so the honest thing
+// is to name them rather than let a plausible guess sit in the dictionary
+// looking exactly like a recorded fact.
+func printProvisional(a *app, byID map[string]storage.Word) {
+	var words []string
+	for _, w := range byID {
+		if w.PartsSource == "model" {
+			words = append(words, w.Word)
+		}
+	}
+	if len(words) == 0 {
+		return
+	}
+	sort.Strings(words)
+
+	fmt.Fprintf(a.stdout, "\n以下 %d 个词的构词只有模型给过意见，词法数据无法验证：\n", len(words))
+	for _, word := range words {
+		fmt.Fprintf(a.stdout, "  %s\n", word)
+	}
+	fmt.Fprintln(a.stdout, "核对后可写进 internal/lexicon/overrides.jsonl（一行一个，格式见该文件），")
+	fmt.Fprintln(a.stdout, "那条更正优先级最高，--recheck 不会推翻它。")
+}
+
+// backfillStats reports what a form-layer pass did.
+type backfillStats struct {
+	Filled   int
+	FromData int
+	Failures []string
+}
+
+// backfillForm asks the model for the form layer of the given words and writes
+// it back in place, updating byID so a caller that builds a digest from it sees
+// the new values.
+//
+// Failures are collected rather than fatal, for the same reason they are
+// collected during expansion generation: eleven words upgraded and one failure
+// is a better outcome than none.
+//
+// Only the missing fields are written. The anchor is a user asset, and an
+// upgrade has no business rewriting an explanation the learner has already read
+// a hundred times. In partsOnly mode the phonics line is left exactly as it is,
+// so re-checking a segmentation never churns a line that was already right.
+func backfillForm(a *app, byID map[string]storage.Word, ids []string, partsOnly bool) backfillStats {
+	apiKey := deepSeekKey()
+	if apiKey == "" {
+		return backfillStats{Failures: []string{"DEEPSEEK_API_KEY is not set"}}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	client := dict.NewClient(apiKey, a.cfg.baseURL, a.cfg.model, a.cfg.timeout)
+	store := storage.OpenWords(a.cfg.paths.Words)
+
+	var stats backfillStats
+
+	for i, id := range ids {
+		w, ok := byID[id]
+		if !ok {
+			continue
+		}
+		if a.cfg.color {
+			fmt.Fprintf(a.stderr, "\r  %d/%d 补齐拼读与构词…", i+1, len(ids))
+		}
+
+		opts := morphologyOptions(a, w.Word)
+		entry, err := client.Generate(ctx, w.Word, opts)
+		if err != nil {
+			stats.Failures = append(stats.Failures, fmt.Sprintf("%s: %v", w.Word, err))
+			continue
+		}
+		parts, source := opts.Apply(entry.Parts)
+		form := storage.Form{Parts: parts, Source: source}
+		if !partsOnly {
+			form.Phonics = entry.Phonics
+		}
+
+		saved, err := store.SetForm(w.Normalized, form)
+		if err != nil {
+			stats.Failures = append(stats.Failures, fmt.Sprintf("%s: %v", w.Word, err))
+			continue
+		}
+		if source != "model" {
+			stats.FromData++
+		}
+		byID[id] = saved
+		stats.Filled++
+	}
+	if a.cfg.color && len(ids) > 0 {
+		fmt.Fprint(a.stderr, "\r\033[K")
+	}
+	return stats
 }
 
 // generateMissing fills in expansion content for the given words.
@@ -879,8 +1181,10 @@ Usage:
   love <word>              查词
 
 Look a word up. The first lookup asks DeepSeek (fastest, cheapest model by
-default) and stores the answer in your personal word file; every lookup after
-that is served from that file with no network request and no cost.
+default) for the word's IPA, how to sound it out, how it is built from a prefix,
+a root and a suffix, a child-simple explanation and one Chinese meaning, then
+stores the answer in your personal word file; every lookup after that is served
+from that file with no network request and no cost.
 
 `)
 
@@ -921,10 +1225,11 @@ Mail (needed for --daily to send):
   LOVE_MAIL_TO        recipient, default SMTP_USER
 
 Files (under the store directory):
-  words.jsonl         your words
+  words.jsonl         your words: ipa, phonics, parts, eli5, chinese
   reviews.jsonl       your learning history
   memory.json         derived state, rebuildable from the two above
   generated.jsonl     cached example sentences and dialogue
+  lexicon/            morphology data: how words are really built (optional)
 
 Flags:
   -h, --help          show this help
@@ -936,6 +1241,8 @@ Examples:
   love --review
   love --daily --dry-run
   love --daily --out /tmp/today.html
+  love --backfill
+  love --backfill --recheck
   love --install-schedule --at 07:30,12:30,20:30
 `)
 }

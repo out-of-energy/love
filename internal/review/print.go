@@ -11,8 +11,18 @@ import (
 
 // writeAnchor prints the first layer using the same block the dictionary
 // prints, so a word looks identical wherever it appears.
+//
+// The Chinese gloss is not part of that block: review is where a word is
+// recalled, and the gloss is the answer. It stays in the file, and it stays in
+// the daily email, which is read away from the desk.
 func writeAnchor(out io.Writer, w storage.Word, color bool) {
-	render.Record(out, w.Word, w.IPA, w.ELI5, w.Chinese, color)
+	render.Record(out, render.Anchor{
+		Word:    w.Word,
+		IPA:     w.IPA,
+		Phonics: w.Phonics,
+		Parts:   w.Parts,
+		ELI5:    w.ELI5,
+	}, color)
 }
 
 // writeExpansion prints the second layer: the fuller meaning, the scene, and

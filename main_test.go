@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,7 +151,10 @@ func writeWords(t *testing.T, path, content string) {
 
 func TestRunServesACacheHitWithoutAnAPIKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "words.jsonl")
-	writeWords(t, path, `{"word":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的"}`+"\n")
+	writeWords(t, path, `{"word":"evil","ipa":"/ˈiːvəl/",`+
+		`"phonics":"e·vil → /ˈiː/ · /vəl/",`+
+		`"parts":"no clear prefix or suffix (whole word from Old English)",`+
+		`"eli5":"Very, very bad.","chinese":"邪恶的"}`+"\n")
 	t.Setenv("EWH_CACHE", path)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
@@ -155,8 +162,35 @@ func TestRunServesACacheHitWithoutAnAPIKey(t *testing.T) {
 	if code := run([]string{"EVIL"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Very, very bad.") || !strings.Contains(stdout.String(), "邪恶的") {
-		t.Errorf("stdout = %q", stdout.String())
+	out := stdout.String()
+	if !strings.Contains(out, "Very, very bad.") || !strings.Contains(out, "Phonics: e·vil") {
+		t.Errorf("stdout = %q", out)
+	}
+	// The gloss is stored and never printed: the terminal is where a word is
+	// recalled, and the gloss is the answer to that test.
+	if strings.Contains(out, "中文") || strings.Contains(out, "邪恶的") {
+		t.Errorf("the terminal block must not carry the gloss: %q", out)
+	}
+}
+
+// A word file written before the form layer existed must stay readable, and a
+// hit on it must stay offline — the missing lines are filled by --backfill or
+// by the next daily run, never by a lookup.
+func TestRunPrintsALegacyRecordWithoutTheFormLayer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "words.jsonl")
+	writeWords(t, path, `{"id":"a1b2c3d4","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/",`+
+		`"eli5":"Very, very bad.","chinese":"邪恶的","source":"cli",`+
+		`"created_at":"2026-01-02T03:04:05+08:00"}`+"\n")
+	t.Setenv("EWH_CACHE", path)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"evil"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	want := "evil /ˈiːvəl/\nELI5: Very, very bad.\n"
+	if stdout.String() != want {
+		t.Errorf("got %q, want %q", stdout.String(), want)
 	}
 }
 
@@ -527,6 +561,203 @@ func TestDailyWithoutMailConfigurationExplainsItself(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--dry-run") {
 		t.Errorf("stderr should point at the dry run: %q", stderr.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The form layer: phonics and word parts, and the upgrade that adds them to
+// records written before they existed.
+// ---------------------------------------------------------------------------
+
+// fakeDeepSeek answers the two kinds of request the tool makes: an anchor
+// lookup (which carries the form layer) and expansion content. The counter
+// proves how many requests a run actually spent.
+func fakeDeepSeek(t *testing.T, anchor string) (*httptest.Server, *int) {
+	t.Helper()
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		content := anchor
+		if strings.Contains(string(body), "dialogue") {
+			content = `{"meaning":"to keep something in good condition","examples":["I maintain my bicycle."],"scene":"Someone caring for what they own.","dialogue":[{"speaker":"A","line":"I maintain it every month."}]}`
+		}
+		payload, err := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
+		})
+		if err != nil {
+			t.Errorf("cannot build a fake reply: %v", err)
+		}
+		w.Write(payload)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+const maintainAnchor = `{"word":"maintain","ipa":"/meɪnˈteɪn/",` +
+	`"phonics":"main·tain → /meɪn/ · /ˈteɪn/",` +
+	`"parts":"main- (hand) · tain (hold) ⇒ \"to hold by hand\"",` +
+	`"eli5":"To keep something working well.","chinese":"维护"}`
+
+// A record written before the form layer existed gets one request and one
+// in-place update — never a second record, and never a rewritten anchor.
+func TestBackfillFillsTheFormLayerWithoutTouchingTheAnchor(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1b2c3d4","word":"maintain","normalized":"maintain",`+
+		`"ipa":"/meɪnˈteɪn/","eli5":"To keep something working well.","chinese":"维护",`+
+		`"source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	srv, calls := fakeDeepSeek(t, maintainAnchor)
+	t.Setenv("DEEPSEEK_BASE_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
+	}
+	if *calls != 1 {
+		t.Errorf("want exactly one request for one word, got %d", *calls)
+	}
+
+	words, warnings, err := storage.OpenWords(paths.Words).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("the rewrite produced warnings: %v", warnings)
+	}
+	if len(words) != 1 {
+		t.Fatalf("got %d records, want 1: an upgrade must update in place, not append", len(words))
+	}
+
+	w := words[0]
+	if w.Phonics != "main·tain → /meɪn/ · /ˈteɪn/" {
+		t.Errorf("phonics = %q", w.Phonics)
+	}
+	if w.Parts != `main- (hand) · tain (hold) ⇒ "to hold by hand"` {
+		t.Errorf("parts = %q", w.Parts)
+	}
+	// The anchor is a user asset. An upgrade may add what is missing and
+	// nothing else — not the id, not the explanation the learner has read a
+	// hundred times, not the creation time that decides study order.
+	if w.ID != "a1b2c3d4" || w.IPA != "/meɪnˈteɪn/" || w.ELI5 != "To keep something working well." ||
+		w.Chinese != "维护" || w.Source != "cli" || w.CreatedAt.IsZero() {
+		t.Errorf("the backfill rewrote part of the anchor: %+v", w)
+	}
+}
+
+func TestBackfillWithoutAKeyExplainsItself(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"maintain","normalized":"maintain","ipa":"/x/",`+
+		`"eli5":"e","chinese":"维护","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "DEEPSEEK_API_KEY") {
+		t.Errorf("stderr should explain the missing key: %q", stderr.String())
+	}
+}
+
+// Nothing to upgrade means nothing to spend: a complete file must not need a
+// key at all.
+func TestBackfillSaysSoWhenNothingIsMissing(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"maintain","normalized":"maintain","ipa":"/x/",`+
+		`"phonics":"main·tain → /meɪn/ · /ˈteɪn/","parts":"main- (hand) · tain (hold)",`+
+		`"eli5":"e","chinese":"维护","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "没有需要补齐的") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+// The daily run is where old records get upgraded without a separate command:
+// it is already spending requests, and it only touches the words it will show.
+func TestDailyFillsTheFormLayerOfTodaysWords(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1b2c3d4","word":"maintain","normalized":"maintain",`+
+		`"ipa":"/meɪnˈteɪn/","eli5":"To keep something working well.","chinese":"维护",`+
+		`"source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	srv, _ := fakeDeepSeek(t, maintainAnchor)
+	t.Setenv("DEEPSEEK_BASE_URL", srv.URL)
+	t.Setenv("QQ_SMTP_AUTH_CODE", "")
+	t.Setenv("SMTP_PASSWORD_FILE", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--daily", "--dry-run"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Phonics: main·tain → /meɪn/ · /ˈteɪn/") {
+		t.Errorf("the digest should carry the form layer it just filled:\n%s", out)
+	}
+	// The email is read on a phone, where the gloss is help rather than a
+	// spoiler, so it keeps it even though the terminal does not.
+	if !strings.Contains(out, "中文：维护") {
+		t.Errorf("the digest should keep the gloss:\n%s", out)
+	}
+
+	// The fill is persisted: the next lookup is a hit with the form layer.
+	words, _, err := storage.OpenWords(paths.Words).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(words) != 1 || !strings.HasPrefix(words[0].Phonics, "main·tain") {
+		t.Errorf("the daily run did not persist the form layer: %+v", words)
+	}
+}
+
+// The tail is the part no data can verify, so --backfill names it instead of
+// leaving a plausible guess indistinguishable from a recorded fact.
+func TestBackfillNamesTheWordsOnlyAModelExplained(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"literrally","normalized":"literrally","ipa":"/x/",`+
+		`"phonics":"lit·er·al·ly → /ˈlɪt/","parts":"litter (letter) · -al · -ly","parts_source":"model",`+
+		`"eli5":"e","chinese":"字面上","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "literrally") {
+		t.Errorf("the provisional word should be named:\n%s", out)
+	}
+	if !strings.Contains(out, "overrides.jsonl") {
+		t.Errorf("the way to correct it should be named too:\n%s", out)
+	}
+}
+
+// A word the data explains is not provisional, so it must not be listed.
+func TestBackfillDoesNotCallDataBackedWordsProvisional(t *testing.T) {
+	paths := storage.PathsIn(t.TempDir())
+	writeWords(t, paths.Words, `{"id":"a1","word":"unhappy","normalized":"unhappy","ipa":"/x/",`+
+		`"phonics":"un·hap·py → /ʌn/","parts":"un- (not) · happy","parts_source":"morphology",`+
+		`"eli5":"e","chinese":"不快乐","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
+	t.Setenv("EWH_CACHE", paths.Words)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--backfill"}, strings.NewReader(""), &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "overrides.jsonl") {
+		t.Errorf("a data-backed word must not be listed as provisional:\n%s", stdout.String())
 	}
 }
 

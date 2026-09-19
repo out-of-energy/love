@@ -5,16 +5,16 @@ A cache-first command line English dictionary.
 ```console
 $ love serendipity
 serendipity /ˌserənˈdɪpəti/
-
+Phonics: ser·en·dip·i·ty → /ˌser/ · /ən/ · /ˈdɪp/ · /ə/ · /ti/
+Parts: Serendip (old name of Sri Lanka) · -ity (state of) ⇒ "the state of Serendip"
 ELI5: A happy thing you find by chance.
-
-中文：意外发现美好事物
 ```
 
-The first lookup for a word asks DeepSeek for its IPA, an explanation simple
-enough for a three-year-old, and one common Chinese meaning. The answer is
-stored in your own word file. **Every lookup after that is served from that
-file with no network request and no cost.**
+The first lookup for a word asks DeepSeek for its IPA, how to sound it out, how
+it is built from a prefix, a root and a suffix, an explanation simple enough for
+a three-year-old, and one common Chinese meaning. The answer is stored in your
+own word file. **Every lookup after that is served from that file with no
+network request and no cost.**
 
 ## Why
 
@@ -57,6 +57,8 @@ Add those lines to `~/.zshrc` or `~/.bashrc` to make them permanent.
 love <word>          # look a word up
 love --review        # work through today's review
 love --daily         # build and send today's email
+love --backfill      # fill in phonics and word parts for older words
+love --backfill --recheck   # re-check existing splits against the morphology data
 love --help
 love --version
 ```
@@ -156,19 +158,32 @@ without an email, those two files are the first place to look.
 
 ## Output
 
-Exactly three lines, always:
+Exactly four lines, always:
 
 ```text
 word /ipa/
-
+Phonics: <the word split into sound chunks, with each chunk's pronunciation>
+Parts: <prefix · root · suffix, each with its meaning ⇒ "the literal sense">
 ELI5: <a very simple English explanation>
-
-中文：<one common Chinese meaning>
 ```
 
+A word that predates the form layer prints two of those lines rather than two
+empty labels — see [Upgrading to the form layer](#upgrading-to-the-form-layer).
+
 Nothing else is printed on success: no JSON, no file paths, no "saved"
-messages. On a terminal the head line is bold; when piped or when `NO_COLOR` is
-set, output is plain text.
+messages, and no Chinese gloss. The terminal is where a word is recalled, and
+the gloss is the answer to that test; the daily email still carries it, because
+reading on a phone is not the same act as remembering at a desk. An action may
+report progress — `love --backfill` says how many words it is filling — but a
+lookup prints the block above and nothing more.
+
+The notation is fixed. Chunks and word parts are joined with the middle dot
+`·`, `→` maps a spelling to its sounds, and `⇒` maps a construction to its
+literal sense. The middle dot is not decoration: `-` belongs to the word itself
+in a word like `ex-husband`, so it cannot double as a separator.
+
+On a terminal the head line is bold; when piped or when `NO_COLOR` is set,
+output is plain text.
 
 ## Configuration
 
@@ -200,13 +215,30 @@ tokens would only be discarded.
 
 ## The word file
 
-One JSON object per line, eight fields, nothing else:
+One JSON object per line, eleven fields, nothing else:
 
 ```json
-{"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
+{"id":"4adb2c8c","word":"evil","normalized":"evil","ipa":"/ˈiːvəl/","phonics":"e·vil → /ˈiː/ · /vəl/","parts":"evil (bad, harmful) ⇒ \"bad, harmful\"","parts_source":"morphology","eli5":"Very, very bad.","chinese":"邪恶的","source":"cli","created_at":"2026-09-13T14:47:22+08:00"}
 ```
 
-The store is four files under the store directory:
+`phonics`, `parts` and `parts_source` are omitted when a record predates them, so
+a line written by an older version keeps its original bytes until something
+upgrades it.
+
+`parts_source` says where a segmentation came from, and it is the field that
+makes the rest honest:
+
+| Value | Meaning |
+|---|---|
+| `model` | the morphology data had nothing to say, so the model worked it out |
+| `morphology` | the data supplied the split and the model agreed with it |
+| `override` | a hand correction in `internal/lexicon/overrides.jsonl` |
+| `morphology-compound` | the model read it as a compound of two ordinary words |
+| `morphology-declined` | the model refused every recorded analysis |
+| `morphology-forced` | the model disagreed and the data won |
+
+The store is four files under the store directory, plus an optional data
+directory:
 
 | File | Role | Rebuildable |
 |---|---|---|
@@ -214,11 +246,13 @@ The store is four files under the store directory:
 | `reviews.jsonl` | your learning history, append-only | ❌ the only history |
 | `memory.json` | derived scheduling state | ✅ from the two above |
 | `generated.jsonl` | cached example sentences and dialogue | ✅ costs one API call |
+| `lexicon/` | how words are really built (optional) | ✅ re-run the build script |
 
-The split matters. `words.jsonl` holds the anchor layer — IPA, the child-simple
-explanation, one Chinese meaning — and it is never regenerated, because memory
-depends on a stable cue. `generated.jsonl` holds the expansion layer, which is
-only practice material and is free to be rebuilt.
+The split matters. `words.jsonl` holds the anchor layer — IPA, the phonics
+split, the word parts, the child-simple explanation, one Chinese meaning — and
+it is never regenerated, because memory depends on a stable cue. `generated.jsonl`
+holds the expansion layer, which is only practice material and is free to be
+rebuilt.
 
 `id` and `normalized` exist so a word has a stable identity and a single
 comparison key. `normalized` is stored rather than recomputed, so a future
@@ -228,6 +262,9 @@ change to the normalization rule cannot silently re-partition existing data.
 - A cache **miss** appends exactly one line, under a lock, and re-checks for a
   duplicate first. Two simultaneous lookups cannot produce two records, and
   adding the same word twice is idempotent.
+- `--backfill` (and a `--daily` run) updates an existing record **in place**,
+  under the same lock, and writes only `phonics` and `parts`. The line keeps its
+  position and its anchor.
 - Damaged lines are **skipped with a warning**, never fatal — one bad line
   cannot hide the rest of your dictionary.
 - Duplicate entries resolve to the **first** record, so an existing file with
@@ -250,6 +287,122 @@ Every original field is preserved byte for byte, the file order is kept, and a
 backup is written first. If the file contains a damaged line the upgrade is
 **refused** rather than silently dropping it — fix the line and run again.
 
+### Upgrading to the form layer
+
+That upgrade is offline, and an offline rewrite cannot invent a phonics split or
+an etymology. A record that lacks only `phonics` and `parts` therefore keeps
+working, and prints without those two lines:
+
+```console
+$ love evil
+evil /ˈiːvəl/
+ELI5: Very, very bad.
+```
+
+Two paths fill the gap, and both are paths that already spend requests:
+
+| Path | Scope | Cost |
+|---|---|---|
+| `love --backfill` | every record that needs it | one request per word |
+| `love --daily` | the words today's digest will show | one request per word, once ever |
+
+A lookup never does it. A cache hit is promised to be offline and free, and
+that promise is worth more than a faster upgrade — the record is served as it
+stands until one of the two paths above touches it.
+
+## The morphology data layer
+
+`parts` is the one field a model should not be trusted to invent. Asked to split
+a word, it produces something plausible every time: it once split `symlink` as
+`sym- (together)`, which is not where that `sym` comes from, and `fundamentals`
+as `-amental`, which is not a morpheme. So the segmentation is looked up instead.
+
+The data lives beside your word file, in `~/.ewh/lexicon/`, and is optional.
+Without it everything still works exactly as before, and `parts_source` says
+`model` for every word.
+
+### Building it
+
+```bash
+python3 scripts/build_morphology.py         # ~30 MB download, then ~14 MB on disk
+python3 scripts/build_morphology.py --force # re-download the sources
+```
+
+It reads [MorphyNet](https://github.com/kbatsuren/MorphyNet), which is
+Wiktionary's morpheme segmentations already parsed into a table, and writes
+three indexes plus a `sources.json` recording the exact inputs and their hashes:
+
+| File | What it holds |
+|---|---|
+| `derivations.tsv` | target, source, morpheme, type — 213k rows |
+| `inflections.tsv` | form, lemma, ending — 188k rows |
+| `lemmas.txt` | 316k lemmas, for "is this a word" checks |
+
+> **Licence.** The indexes are derived from Wiktionary and are **CC BY-SA 3.0**,
+> separately from the MIT-licensed code that reads them. That is why they are
+> built next to your word file rather than committed to this repository, and why
+> the build writes the attribution next to them.
+
+### What it changes
+
+For a word the data knows, the model is shown the recorded analyses and must use
+one of them; if it drifts, the analysis is rewritten from the data and the
+record says `morphology-forced`. The model keeps the jobs it is good at: glossing
+a free root and writing the literal sense. It can also refuse — `no clear prefix
+or suffix` is always an acceptable answer, and the only one that can save a
+coinage like `symlink` from a tidy, wrong story.
+
+The curated half — 426 prefixes, suffixes and roots with their meanings — is
+compiled into the binary (`internal/lexicon/affixes.jsonl`), which is also what
+lets the tool explain Greek compounds like `biology` and `telegraph` that no
+derivation table records.
+
+### When the data is wrong
+
+It sometimes is. Wiktionary derives `curious` from the element `curium`, and no
+table knows that `sym` in `symlink` is a clipping of `symbolic`. Those words go
+in `internal/lexicon/overrides.jsonl`, which outranks everything and survives a
+re-check. Currently one word is corrected there.
+
+`love --backfill --recheck` re-examines words whose stored split no longer
+matches the data — after a rebuild, a table edit, or a new correction. A word the
+data already agrees with costs no request, so running it is free when nothing
+has changed.
+
+### The tail
+
+Words nothing can speak for — coinages, proper nouns, typos — are explained by
+the model alone and marked `parts_source: model`. That answer is provisional and
+nothing can verify it, so `love --backfill` ends by naming those words rather
+than leaving a plausible guess indistinguishable from a recorded fact:
+
+```console
+$ love --backfill
+每个词都已经有拼读和构词，没有需要补齐的。
+
+以下 3 个词的构词只有模型给过意见，词法数据无法验证：
+  caommunication
+  literrally
+  venice
+```
+
+Anything you check belongs in `internal/lexicon/overrides.jsonl`. An override
+outranks the data, and a re-check will not undo it.
+
+### Measuring it
+
+`internal/lexicon/testdata/parts_gold.jsonl` is a hand-checked answer key of 56
+common words. It runs as a test, and skips when no data layer is installed:
+
+```bash
+go test ./internal/lexicon -run TestGoldSet -v
+```
+
+The current score is **55/55 of the words the data has an opinion on** (one of
+them via a hand correction). Before the table-driven splitter existed it was
+44/55, and the misses were exactly the Greek compounds and the over-split
+familiar words.
+
 ## Testing
 
 Four layers, cheapest first. The first three need **no API key** and cost
@@ -257,15 +410,16 @@ nothing, so they are the ones to run on every change.
 
 | Layer | Command | Key | Cost | Covers |
 |---|---|---|---|---|
-| 1. Unit | `go test ./...` | no | free | normalization, tolerant reading, first-record-wins, dedup append, HTTP parsing, retry and fallback, render format |
+| 1. Unit | `go test ./...` | no | free | normalization, tolerant reading, first-record-wins, dedup append, in-place form-layer upgrade, segmentation from data, the gold set, HTTP parsing, retry and fallback, render format |
 | 2. Race | `go test -race -count=1 ./...` | no | free | concurrent appends under the write lock |
-| 3. End-to-end, mocked | `python3 scripts/e2e_mock_check.py` | no | free | the real binary over real HTTP: generate → persist → hit, plus every exit code |
+| 3. End-to-end, mocked | `python3 scripts/e2e_mock_check.py` | no | free | the real binary over real HTTP: generate → persist → hit → backfill, plus every exit code |
 | 4. Real API | `love <new-word>` then `love <same-word>` | yes | ~1 call | the real model, real billing, real persistence |
 
 `scripts/e2e_mock_check.py` spawns a throwaway local HTTP server and drives the
-compiled binary against it. It asserts 19 conditions, including that the second
-lookup makes **zero** requests and that failures never write to the word file.
-Set `LOVE_BIN=/path/to/love` to test a binary that is not on `PATH`.
+compiled binary against it. It asserts 85 conditions, including that the second
+lookup makes **zero** requests, that a backfill rewrites only the two form
+fields and leaves the anchor alone, and that failures never write to the word
+file. Set `LOVE_BIN=/path/to/love` to test a binary that is not on `PATH`.
 
 ### Manual smoke checklist
 
@@ -276,6 +430,7 @@ love "  symlink "                           # trimming and phrases       -> 0
 love --nope                                 # unknown flag               -> 2
 love                                        # no word                    -> 2
 env -u DEEPSEEK_API_KEY love serendipity    # miss without a key         -> 2, empty stdout
+love --backfill                             # nothing missing            -> 0, no key needed
 love curious | cat                          # piped output has no escapes
 ```
 
@@ -318,12 +473,14 @@ The project grew from a dictionary into a memory engine, so the plan lives in
 | M3 | `--review`: recall first, anchor as the answer, expansion behind `e` | ✅ |
 | M4 | the expansion layer: generated, validated, cached | ✅ |
 | M5 | `--daily`: generate, render, send | ✅ |
+| M6 | the form layer: phonics and word parts, and `--backfill` to add them to older words | ✅ |
+| M7 | the morphology data layer: real segmentations, a curated affix table, and a gold set to measure them | ✅ |
 | | `--stats`, `--export` | planned |
 | | a Reminders adapter, and a launchd job to run `--daily` each morning | planned |
 
 `docs/v0.3-review.md` holds the current design review and the milestone detail;
 `docs/cli-design.md` explains the command grammar; `docs/content-layers.md`
-explains why there are two layers.
+explains why the content is split into layers.
 
 Two earlier documents are kept as history rather than as guidance, because they
 record what was proposed and what was wrong with it:

@@ -15,7 +15,10 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 // fixedDigest is the input every golden comparison is built from. It includes
 // one word with expansion content and one without, so the golden output also
-// pins the degraded layout that a failed generation produces.
+// pins the degraded layout that a failed generation produces. The word without
+// expansion is also the one without a form layer, which pins the second
+// degraded shape: a record that predates phonics/parts prints without them
+// rather than with empty labels.
 func fixedDigest() Digest {
 	return Digest{
 		Date: time.Date(2026, time.September, 14, 0, 0, 0, 0, time.UTC),
@@ -23,6 +26,8 @@ func fixedDigest() Digest {
 			{
 				Word:    "maintain",
 				IPA:     "/meɪnˈteɪn/",
+				Phonics: "main·tain → /meɪn/ · /ˈteɪn/",
+				Parts:   `main- (hand) · tain (hold) ⇒ "to hold by hand"`,
 				ELI5:    "To keep something working well.",
 				Chinese: "维护，保持",
 				Content: &ai.Content{
@@ -211,7 +216,10 @@ func TestTextVersionCarriesBothLayers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"maintain", "/meɪnˈteɪn/", "ELI5: To keep something working well.", "中文：维护，保持",
+		"maintain", "/meɪnˈteɪn/",
+		"Phonics: main·tain → /meɪn/ · /ˈteɪn/",
+		`Parts: main- (hand) · tain (hold) ⇒ "to hold by hand"`,
+		"ELI5: To keep something working well.", "中文：维护，保持",
 		"扩展", "to keep something in good condition",
 		"I maintain my bicycle every month.",
 		"A  Your bike still looks new.",

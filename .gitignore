@@ -7,6 +7,14 @@
 *.jsonl
 !testdata/**/*.jsonl
 
+# The curated morphology tables are the exception to that rule, and the reason
+# the rule is written at all: they are source. The affix and override tables
+# compile into the binary, and the gold set is a test fixture, so a clone that
+# was missing them would not build. What must stay out is the *downloaded*
+# Wiktionary index, which lives in ~/.ewh/lexicon/ and carries CC BY-SA.
+!internal/lexicon/*.jsonl
+!internal/lexicon/testdata/*.jsonl
+
 # Write lock sidecar files
 *.lock
 

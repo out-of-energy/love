@@ -1,0 +1,426 @@
+{"form":"un-","type":"prefix","gloss":"not; reverse","lang":"oe"}
+{"form":"fore-","type":"prefix","gloss":"before, in front","lang":"oe"}
+{"form":"out-","type":"prefix","gloss":"out, beyond","lang":"oe"}
+{"form":"over-","type":"prefix","gloss":"over, too much","lang":"oe"}
+{"form":"under-","type":"prefix","gloss":"under, too little","lang":"oe"}
+{"form":"up-","type":"prefix","gloss":"up, upward","lang":"oe"}
+{"form":"down-","type":"prefix","gloss":"down, downward","lang":"oe"}
+{"form":"with-","type":"prefix","gloss":"away, against","lang":"oe"}
+{"form":"mid-","type":"prefix","gloss":"middle","lang":"oe"}
+{"form":"mis-","type":"prefix","gloss":"wrong, badly","lang":"oe"}
+{"form":"be-","type":"prefix","gloss":"around, thoroughly","lang":"oe"}
+{"form":"self-","type":"prefix","gloss":"self","lang":"oe"}
+{"form":"well-","type":"prefix","gloss":"well","lang":"oe"}
+{"form":"step-","type":"prefix","gloss":"orphaned, related by marriage","lang":"oe"}
+{"form":"ill-","type":"prefix","gloss":"badly","lang":"gmc"}
+{"form":"non-","type":"prefix","gloss":"not","lang":"la"}
+{"form":"counter-","type":"prefix","gloss":"against","lang":"fr"}
+{"form":"contra-","type":"prefix","gloss":"against","lang":"la"}
+{"form":"extra-","type":"prefix","gloss":"outside, beyond","lang":"la"}
+{"form":"ultra-","type":"prefix","gloss":"beyond","lang":"la"}
+{"form":"infra-","type":"prefix","gloss":"below","lang":"la"}
+{"form":"vice-","type":"prefix","gloss":"in place of","lang":"la"}
+{"form":"retro-","type":"prefix","gloss":"backward","lang":"la"}
+{"form":"se-","type":"prefix","gloss":"apart","lang":"la"}
+{"form":"ambi-","type":"prefix","gloss":"both","lang":"la"}
+{"form":"omni-","type":"prefix","gloss":"all","lang":"la"}
+{"form":"magn-","type":"prefix","gloss":"great","lang":"la"}
+{"form":"mal-","type":"prefix","gloss":"bad, badly","lang":"la"}
+{"form":"bene-","type":"prefix","gloss":"well, good","lang":"la"}
+{"form":"quasi-","type":"prefix","gloss":"almost, seemingly","lang":"la"}
+{"form":"circum-","type":"prefix","gloss":"around","lang":"la"}
+{"form":"multi-","type":"prefix","gloss":"many","lang":"la"}
+{"form":"semi-","type":"prefix","gloss":"half","lang":"la"}
+{"form":"bi-","type":"prefix","gloss":"two","lang":"la"}
+{"form":"tri-","type":"prefix","gloss":"three","lang":"la"}
+{"form":"quad-","type":"prefix","gloss":"four","lang":"la"}
+{"form":"dec-","type":"prefix","gloss":"ten","lang":"la"}
+{"form":"cent-","type":"prefix","gloss":"hundred","lang":"la"}
+{"form":"milli-","type":"prefix","gloss":"thousand","lang":"la"}
+{"form":"uni-","type":"prefix","gloss":"one","lang":"la"}
+{"form":"co-","type":"prefix","gloss":"together","lang":"la"}
+{"form":"com-","type":"prefix","gloss":"together","lang":"la"}
+{"form":"con-","type":"prefix","gloss":"together","lang":"la"}
+{"form":"col-","type":"prefix","gloss":"together","lang":"la"}
+{"form":"cor-","type":"prefix","gloss":"together","lang":"la"}
+{"form":"in-","type":"prefix","gloss":"not; into","lang":"la"}
+{"form":"im-","type":"prefix","gloss":"not; into","lang":"la"}
+{"form":"il-","type":"prefix","gloss":"not; into","lang":"la"}
+{"form":"ir-","type":"prefix","gloss":"not; into","lang":"la"}
+{"form":"re-","type":"prefix","gloss":"again, back","lang":"la"}
+{"form":"dis-","type":"prefix","gloss":"apart, not","lang":"la"}
+{"form":"dif-","type":"prefix","gloss":"apart, not","lang":"la"}
+{"form":"pre-","type":"prefix","gloss":"before","lang":"la"}
+{"form":"post-","type":"prefix","gloss":"after","lang":"la"}
+{"form":"ante-","type":"prefix","gloss":"before","lang":"la"}
+{"form":"ad-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"ac-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"af-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"ag-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"al-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"ap-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"ar-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"as-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"at-","type":"prefix","gloss":"to, toward","lang":"la"}
+{"form":"ab-","type":"prefix","gloss":"away from","lang":"la"}
+{"form":"abs-","type":"prefix","gloss":"away from","lang":"la"}
+{"form":"ob-","type":"prefix","gloss":"against, toward","lang":"la"}
+{"form":"oc-","type":"prefix","gloss":"against, toward","lang":"la"}
+{"form":"op-","type":"prefix","gloss":"against, toward","lang":"la"}
+{"form":"sub-","type":"prefix","gloss":"under","lang":"la"}
+{"form":"super-","type":"prefix","gloss":"above, over","lang":"la"}
+{"form":"inter-","type":"prefix","gloss":"between, among","lang":"la"}
+{"form":"intra-","type":"prefix","gloss":"within","lang":"la"}
+{"form":"intro-","type":"prefix","gloss":"inward","lang":"la"}
+{"form":"trans-","type":"prefix","gloss":"across","lang":"la"}
+{"form":"de-","type":"prefix","gloss":"down, away from","lang":"la"}
+{"form":"ex-","type":"prefix","gloss":"out","lang":"la"}
+{"form":"e-","type":"prefix","gloss":"out","lang":"la"}
+{"form":"ef-","type":"prefix","gloss":"out","lang":"la"}
+{"form":"per-","type":"prefix","gloss":"through, thoroughly","lang":"la"}
+{"form":"pro-","type":"prefix","gloss":"forward, for","lang":"la"}
+{"form":"en-","type":"prefix","gloss":"in, into","lang":"fr"}
+{"form":"em-","type":"prefix","gloss":"in, into","lang":"fr"}
+{"form":"pan-","type":"prefix","gloss":"all","lang":"grc"}
+{"form":"eu-","type":"prefix","gloss":"good, well","lang":"grc"}
+{"form":"dys-","type":"prefix","gloss":"bad, difficult","lang":"grc"}
+{"form":"proto-","type":"prefix","gloss":"first","lang":"grc"}
+{"form":"pseudo-","type":"prefix","gloss":"false","lang":"grc"}
+{"form":"anti-","type":"prefix","gloss":"against","lang":"grc"}
+{"form":"hyper-","type":"prefix","gloss":"over, above","lang":"grc"}
+{"form":"hypo-","type":"prefix","gloss":"under, below","lang":"grc"}
+{"form":"meta-","type":"prefix","gloss":"after, beyond","lang":"grc"}
+{"form":"para-","type":"prefix","gloss":"beside, beyond","lang":"grc"}
+{"form":"peri-","type":"prefix","gloss":"around","lang":"grc"}
+{"form":"amphi-","type":"prefix","gloss":"both, around","lang":"grc"}
+{"form":"ana-","type":"prefix","gloss":"up, back","lang":"grc"}
+{"form":"cata-","type":"prefix","gloss":"down","lang":"grc"}
+{"form":"dia-","type":"prefix","gloss":"through, across","lang":"grc"}
+{"form":"epi-","type":"prefix","gloss":"upon, over","lang":"grc"}
+{"form":"apo-","type":"prefix","gloss":"away from","lang":"grc"}
+{"form":"syn-","type":"prefix","gloss":"together","lang":"grc"}
+{"form":"sym-","type":"prefix","gloss":"together","lang":"grc"}
+{"form":"syl-","type":"prefix","gloss":"together","lang":"grc"}
+{"form":"sys-","type":"prefix","gloss":"together","lang":"grc"}
+{"form":"an-","type":"prefix","gloss":"without","lang":"grc"}
+{"form":"a-","type":"prefix","gloss":"without","lang":"grc"}
+{"form":"tele-","type":"prefix","gloss":"far, at a distance","lang":"grc"}
+{"form":"auto-","type":"prefix","gloss":"self","lang":"grc"}
+{"form":"bio-","type":"prefix","gloss":"life","lang":"grc"}
+{"form":"geo-","type":"prefix","gloss":"earth","lang":"grc"}
+{"form":"micro-","type":"prefix","gloss":"small","lang":"grc"}
+{"form":"macro-","type":"prefix","gloss":"large","lang":"grc"}
+{"form":"mono-","type":"prefix","gloss":"one","lang":"grc"}
+{"form":"poly-","type":"prefix","gloss":"many","lang":"grc"}
+{"form":"hemi-","type":"prefix","gloss":"half","lang":"grc"}
+{"form":"di-","type":"prefix","gloss":"two","lang":"grc"}
+{"form":"penta-","type":"prefix","gloss":"five","lang":"grc"}
+{"form":"kilo-","type":"prefix","gloss":"thousand","lang":"grc"}
+{"form":"mega-","type":"prefix","gloss":"great, large","lang":"grc"}
+{"form":"neo-","type":"prefix","gloss":"new","lang":"grc"}
+{"form":"hetero-","type":"prefix","gloss":"other, different","lang":"grc"}
+{"form":"homo-","type":"prefix","gloss":"same","lang":"grc"}
+{"form":"iso-","type":"prefix","gloss":"equal","lang":"grc"}
+{"form":"aero-","type":"prefix","gloss":"air","lang":"grc"}
+{"form":"astro-","type":"prefix","gloss":"star","lang":"grc"}
+{"form":"eco-","type":"prefix","gloss":"house","lang":"grc"}
+{"form":"demi-","type":"prefix","gloss":"half","lang":"fr"}
+{"form":"-ness","type":"suffix","gloss":"state of","lang":"oe"}
+{"form":"-er","type":"suffix","gloss":"one who; more","lang":"oe"}
+{"form":"-ship","type":"suffix","gloss":"state of, skill","lang":"oe"}
+{"form":"-hood","type":"suffix","gloss":"state of","lang":"oe"}
+{"form":"-dom","type":"suffix","gloss":"state of, realm","lang":"oe"}
+{"form":"-ful","type":"suffix","gloss":"full of","lang":"oe"}
+{"form":"-less","type":"suffix","gloss":"without","lang":"oe"}
+{"form":"-like","type":"suffix","gloss":"like","lang":"oe"}
+{"form":"-ly","type":"suffix","gloss":"in the manner of","lang":"oe"}
+{"form":"-ward","type":"suffix","gloss":"in the direction of","lang":"oe"}
+{"form":"-wards","type":"suffix","gloss":"in the direction of","lang":"oe"}
+{"form":"-wise","type":"suffix","gloss":"in the manner of","lang":"oe"}
+{"form":"-ways","type":"suffix","gloss":"in the manner of","lang":"oe"}
+{"form":"-en","type":"suffix","gloss":"to make; made of","lang":"oe"}
+{"form":"-ish","type":"suffix","gloss":"somewhat, like","lang":"oe"}
+{"form":"-y","type":"suffix","gloss":"full of, marked by","lang":"oe"}
+{"form":"-ing","type":"suffix","gloss":"action of","lang":"oe"}
+{"form":"-ed","type":"suffix","gloss":"having, past","lang":"oe"}
+{"form":"-s","type":"suffix","gloss":"plural","lang":"oe"}
+{"form":"-es","type":"suffix","gloss":"plural","lang":"oe"}
+{"form":"-ling","type":"suffix","gloss":"small, young","lang":"oe"}
+{"form":"-ock","type":"suffix","gloss":"small","lang":"oe"}
+{"form":"-ster","type":"suffix","gloss":"one who","lang":"oe"}
+{"form":"-some","type":"suffix","gloss":"tending to","lang":"oe"}
+{"form":"-th","type":"suffix","gloss":"state of","lang":"oe"}
+{"form":"-most","type":"suffix","gloss":"most","lang":"oe"}
+{"form":"-est","type":"suffix","gloss":"most","lang":"oe"}
+{"form":"-ous","type":"suffix","gloss":"full of","lang":"fr"}
+{"form":"-ious","type":"suffix","gloss":"full of","lang":"fr"}
+{"form":"-eous","type":"suffix","gloss":"full of","lang":"fr"}
+{"form":"-ment","type":"suffix","gloss":"result, action","lang":"fr"}
+{"form":"-ity","type":"suffix","gloss":"state of","lang":"fr"}
+{"form":"-ty","type":"suffix","gloss":"state of","lang":"fr"}
+{"form":"-ance","type":"suffix","gloss":"state of","lang":"fr"}
+{"form":"-ence","type":"suffix","gloss":"state of","lang":"fr"}
+{"form":"-age","type":"suffix","gloss":"act of","lang":"fr"}
+{"form":"-ery","type":"suffix","gloss":"practice of","lang":"fr"}
+{"form":"-ry","type":"suffix","gloss":"practice of","lang":"fr"}
+{"form":"-esque","type":"suffix","gloss":"in the style of","lang":"fr"}
+{"form":"-ette","type":"suffix","gloss":"small","lang":"fr"}
+{"form":"-let","type":"suffix","gloss":"small","lang":"fr"}
+{"form":"-ard","type":"suffix","gloss":"one who","lang":"fr"}
+{"form":"-ee","type":"suffix","gloss":"one who receives","lang":"fr"}
+{"form":"-eer","type":"suffix","gloss":"one who","lang":"fr"}
+{"form":"-ier","type":"suffix","gloss":"one who","lang":"fr"}
+{"form":"-ess","type":"suffix","gloss":"female","lang":"fr"}
+{"form":"-ade","type":"suffix","gloss":"action of","lang":"fr"}
+{"form":"-able","type":"suffix","gloss":"able to be","lang":"la"}
+{"form":"-ible","type":"suffix","gloss":"able to be","lang":"la"}
+{"form":"-al","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ial","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ical","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ive","type":"suffix","gloss":"tending to","lang":"la"}
+{"form":"-ative","type":"suffix","gloss":"tending to","lang":"la"}
+{"form":"-ate","type":"suffix","gloss":"to make, cause","lang":"la"}
+{"form":"-ation","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-ition","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-tion","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-sion","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-cion","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-ion","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-cy","type":"suffix","gloss":"state of","lang":"la"}
+{"form":"-ancy","type":"suffix","gloss":"state of","lang":"la"}
+{"form":"-ency","type":"suffix","gloss":"state of","lang":"la"}
+{"form":"-or","type":"suffix","gloss":"one who","lang":"la"}
+{"form":"-ar","type":"suffix","gloss":"one who, relating to","lang":"la"}
+{"form":"-ure","type":"suffix","gloss":"act of","lang":"la"}
+{"form":"-ant","type":"suffix","gloss":"one who, performing","lang":"la"}
+{"form":"-ent","type":"suffix","gloss":"one who, performing","lang":"la"}
+{"form":"-ary","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ory","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-itude","type":"suffix","gloss":"state of","lang":"la"}
+{"form":"-tude","type":"suffix","gloss":"state of","lang":"la"}
+{"form":"-trix","type":"suffix","gloss":"female","lang":"la"}
+{"form":"-ana","type":"suffix","gloss":"collection of","lang":"la"}
+{"form":"-cide","type":"suffix","gloss":"killing of","lang":"la"}
+{"form":"-vore","type":"suffix","gloss":"one who eats","lang":"la"}
+{"form":"-vorous","type":"suffix","gloss":"eating","lang":"la"}
+{"form":"-ferous","type":"suffix","gloss":"bearing","lang":"la"}
+{"form":"-form","type":"suffix","gloss":"in the form of","lang":"la"}
+{"form":"-an","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ian","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-ese","type":"suffix","gloss":"relating to","lang":"la"}
+{"form":"-fer","type":"suffix","gloss":"bearing","lang":"la"}
+{"form":"-ulent","type":"suffix","gloss":"full of","lang":"la"}
+{"form":"-ose","type":"suffix","gloss":"full of","lang":"la"}
+{"form":"-ic","type":"suffix","gloss":"relating to","lang":"grc"}
+{"form":"-ics","type":"suffix","gloss":"study of","lang":"grc"}
+{"form":"-ist","type":"suffix","gloss":"one who","lang":"grc"}
+{"form":"-ism","type":"suffix","gloss":"belief, practice","lang":"grc"}
+{"form":"-ite","type":"suffix","gloss":"native, follower","lang":"grc"}
+{"form":"-ize","type":"suffix","gloss":"to make","lang":"grc"}
+{"form":"-ise","type":"suffix","gloss":"to make","lang":"grc"}
+{"form":"-ology","type":"suffix","gloss":"study of","lang":"grc"}
+{"form":"-ologist","type":"suffix","gloss":"one who studies","lang":"grc"}
+{"form":"-logy","type":"suffix","gloss":"study of","lang":"grc"}
+{"form":"-logist","type":"suffix","gloss":"one who studies","lang":"grc"}
+{"form":"-graphy","type":"suffix","gloss":"writing, recording","lang":"grc"}
+{"form":"-graph","type":"suffix","gloss":"something written","lang":"grc"}
+{"form":"-gram","type":"suffix","gloss":"something written","lang":"grc"}
+{"form":"-meter","type":"suffix","gloss":"measuring device","lang":"grc"}
+{"form":"-metry","type":"suffix","gloss":"act of measuring","lang":"grc"}
+{"form":"-scope","type":"suffix","gloss":"instrument for viewing","lang":"grc"}
+{"form":"-scopy","type":"suffix","gloss":"viewing","lang":"grc"}
+{"form":"-phobia","type":"suffix","gloss":"fear of","lang":"grc"}
+{"form":"-philia","type":"suffix","gloss":"love of","lang":"grc"}
+{"form":"-phile","type":"suffix","gloss":"one who loves","lang":"grc"}
+{"form":"-genous","type":"suffix","gloss":"producing","lang":"grc"}
+{"form":"-genic","type":"suffix","gloss":"producing","lang":"grc"}
+{"form":"-genesis","type":"suffix","gloss":"origin","lang":"grc"}
+{"form":"-oid","type":"suffix","gloss":"resembling","lang":"grc"}
+{"form":"-cracy","type":"suffix","gloss":"rule by","lang":"grc"}
+{"form":"-crat","type":"suffix","gloss":"one who rules","lang":"grc"}
+{"form":"-osis","type":"suffix","gloss":"condition of","lang":"grc"}
+{"form":"-itis","type":"suffix","gloss":"inflammation of","lang":"grc"}
+{"form":"-ectomy","type":"suffix","gloss":"cutting out","lang":"grc"}
+{"form":"-nomy","type":"suffix","gloss":"law of","lang":"grc"}
+{"form":"-archy","type":"suffix","gloss":"rule by","lang":"grc"}
+{"form":"-kin","type":"suffix","gloss":"small","lang":"gmc"}
+{"form":"-oon","type":"suffix","gloss":"large","lang":"it"}
+{"form":"act","type":"root","gloss":"do, drive","lang":"la"}
+{"form":"aud","type":"root","gloss":"to hear","lang":"la"}
+{"form":"bene","type":"root","gloss":"good, well","lang":"la"}
+{"form":"bio","type":"root","gloss":"life","lang":"grc"}
+{"form":"ced","type":"root","gloss":"to go, yield","lang":"la"}
+{"form":"ceiv","type":"root","gloss":"to take","lang":"la"}
+{"form":"cern","type":"root","gloss":"to sift, separate","lang":"la"}
+{"form":"chron","type":"root","gloss":"time","lang":"grc"}
+{"form":"cid","type":"root","gloss":"to cut, kill","lang":"la"}
+{"form":"civ","type":"root","gloss":"citizen","lang":"la"}
+{"form":"claim","type":"root","gloss":"to shout, call","lang":"la"}
+{"form":"clar","type":"root","gloss":"clear","lang":"la"}
+{"form":"clud","type":"root","gloss":"to close","lang":"la"}
+{"form":"cogn","type":"root","gloss":"to know","lang":"la"}
+{"form":"corp","type":"root","gloss":"body","lang":"la"}
+{"form":"cred","type":"root","gloss":"to believe","lang":"la"}
+{"form":"cresc","type":"root","gloss":"to grow","lang":"la"}
+{"form":"curr","type":"root","gloss":"to run","lang":"la"}
+{"form":"dict","type":"root","gloss":"to say","lang":"la"}
+{"form":"duc","type":"root","gloss":"to lead","lang":"la"}
+{"form":"dur","type":"root","gloss":"hard, lasting","lang":"la"}
+{"form":"equ","type":"root","gloss":"equal","lang":"la"}
+{"form":"fac","type":"root","gloss":"to do, make","lang":"la"}
+{"form":"fer","type":"root","gloss":"to carry","lang":"la"}
+{"form":"fid","type":"root","gloss":"faith, trust","lang":"la"}
+{"form":"fin","type":"root","gloss":"end, limit","lang":"la"}
+{"form":"flex","type":"root","gloss":"to bend","lang":"la"}
+{"form":"flu","type":"root","gloss":"to flow","lang":"la"}
+{"form":"form","type":"root","gloss":"shape","lang":"la"}
+{"form":"fort","type":"root","gloss":"strong","lang":"la"}
+{"form":"fract","type":"root","gloss":"to break","lang":"la"}
+{"form":"fug","type":"root","gloss":"to flee","lang":"la"}
+{"form":"gen","type":"root","gloss":"birth, kind","lang":"la"}
+{"form":"geo","type":"root","gloss":"earth","lang":"grc"}
+{"form":"grad","type":"root","gloss":"step","lang":"la"}
+{"form":"graph","type":"root","gloss":"to write, draw","lang":"grc"}
+{"form":"grat","type":"root","gloss":"pleasing, thanks","lang":"la"}
+{"form":"hab","type":"root","gloss":"to hold, have","lang":"la"}
+{"form":"ject","type":"root","gloss":"to throw","lang":"la"}
+{"form":"jud","type":"root","gloss":"to judge","lang":"la"}
+{"form":"junct","type":"root","gloss":"to join","lang":"la"}
+{"form":"lect","type":"root","gloss":"to choose, read","lang":"la"}
+{"form":"lev","type":"root","gloss":"light, to raise","lang":"la"}
+{"form":"liter","type":"root","gloss":"letter","lang":"la"}
+{"form":"loc","type":"root","gloss":"place","lang":"la"}
+{"form":"log","type":"root","gloss":"word, speech","lang":"grc"}
+{"form":"luc","type":"root","gloss":"light","lang":"la"}
+{"form":"man","type":"root","gloss":"hand","lang":"la"}
+{"form":"mand","type":"root","gloss":"to order","lang":"la"}
+{"form":"mar","type":"root","gloss":"sea","lang":"la"}
+{"form":"mater","type":"root","gloss":"mother","lang":"la"}
+{"form":"med","type":"root","gloss":"middle","lang":"la"}
+{"form":"memor","type":"root","gloss":"mindful","lang":"la"}
+{"form":"ment","type":"root","gloss":"mind","lang":"la"}
+{"form":"meter","type":"root","gloss":"measure","lang":"grc"}
+{"form":"migr","type":"root","gloss":"to move, wander","lang":"la"}
+{"form":"min","type":"root","gloss":"small, less","lang":"la"}
+{"form":"mit","type":"root","gloss":"to send","lang":"la"}
+{"form":"mot","type":"root","gloss":"to move","lang":"la"}
+{"form":"mon","type":"root","gloss":"to warn","lang":"la"}
+{"form":"mort","type":"root","gloss":"death","lang":"la"}
+{"form":"nat","type":"root","gloss":"birth","lang":"la"}
+{"form":"nav","type":"root","gloss":"ship","lang":"la"}
+{"form":"nom","type":"root","gloss":"name, law","lang":"grc"}
+{"form":"nov","type":"root","gloss":"new","lang":"la"}
+{"form":"oper","type":"root","gloss":"work","lang":"la"}
+{"form":"opt","type":"root","gloss":"eye, choose","lang":"grc"}
+{"form":"orat","type":"root","gloss":"to speak, pray","lang":"la"}
+{"form":"ord","type":"root","gloss":"order","lang":"la"}
+{"form":"pac","type":"root","gloss":"peace","lang":"la"}
+{"form":"par","type":"root","gloss":"equal, prepare","lang":"la"}
+{"form":"pass","type":"root","gloss":"to suffer, feel","lang":"la"}
+{"form":"pater","type":"root","gloss":"father","lang":"la"}
+{"form":"path","type":"root","gloss":"feeling, suffering","lang":"grc"}
+{"form":"ped","type":"root","gloss":"foot","lang":"la"}
+{"form":"pel","type":"root","gloss":"to drive, push","lang":"la"}
+{"form":"pend","type":"root","gloss":"to hang, weigh","lang":"la"}
+{"form":"phon","type":"root","gloss":"sound","lang":"grc"}
+{"form":"photo","type":"root","gloss":"light","lang":"grc"}
+{"form":"plac","type":"root","gloss":"to please, calm","lang":"la"}
+{"form":"ple","type":"root","gloss":"to fill","lang":"la"}
+{"form":"plic","type":"root","gloss":"to fold","lang":"la"}
+{"form":"pon","type":"root","gloss":"to put, place","lang":"la"}
+{"form":"popul","type":"root","gloss":"people","lang":"la"}
+{"form":"port","type":"root","gloss":"to carry","lang":"la"}
+{"form":"pot","type":"root","gloss":"power","lang":"la"}
+{"form":"prehend","type":"root","gloss":"to seize","lang":"la"}
+{"form":"prim","type":"root","gloss":"first","lang":"la"}
+{"form":"priv","type":"root","gloss":"private, apart","lang":"la"}
+{"form":"prob","type":"root","gloss":"to test, prove","lang":"la"}
+{"form":"proper","type":"root","gloss":"own","lang":"la"}
+{"form":"quir","type":"root","gloss":"to seek, ask","lang":"la"}
+{"form":"reg","type":"root","gloss":"to rule","lang":"la"}
+{"form":"rupt","type":"root","gloss":"to break","lang":"la"}
+{"form":"sacr","type":"root","gloss":"holy","lang":"la"}
+{"form":"sci","type":"root","gloss":"to know","lang":"la"}
+{"form":"scop","type":"root","gloss":"to look at","lang":"grc"}
+{"form":"scrib","type":"root","gloss":"to write","lang":"la"}
+{"form":"sec","type":"root","gloss":"to follow","lang":"la"}
+{"form":"sect","type":"root","gloss":"to cut","lang":"la"}
+{"form":"sed","type":"root","gloss":"to sit","lang":"la"}
+{"form":"sens","type":"root","gloss":"to feel","lang":"la"}
+{"form":"serv","type":"root","gloss":"to serve, keep","lang":"la"}
+{"form":"sign","type":"root","gloss":"mark, sign","lang":"la"}
+{"form":"simil","type":"root","gloss":"like","lang":"la"}
+{"form":"soci","type":"root","gloss":"companion","lang":"la"}
+{"form":"sol","type":"root","gloss":"alone","lang":"la"}
+{"form":"solv","type":"root","gloss":"to loosen","lang":"la"}
+{"form":"spec","type":"root","gloss":"to look","lang":"la"}
+{"form":"spir","type":"root","gloss":"to breathe","lang":"la"}
+{"form":"sta","type":"root","gloss":"to stand","lang":"la"}
+{"form":"string","type":"root","gloss":"to tighten","lang":"la"}
+{"form":"stru","type":"root","gloss":"to build","lang":"la"}
+{"form":"sum","type":"root","gloss":"to take","lang":"la"}
+{"form":"tact","type":"root","gloss":"to touch","lang":"la"}
+{"form":"tain","type":"root","gloss":"to hold","lang":"la"}
+{"form":"techn","type":"root","gloss":"art, skill","lang":"grc"}
+{"form":"tele","type":"root","gloss":"far, at a distance","lang":"grc"}
+{"form":"temp","type":"root","gloss":"time","lang":"la"}
+{"form":"tend","type":"root","gloss":"to stretch","lang":"la"}
+{"form":"termin","type":"root","gloss":"end, limit","lang":"la"}
+{"form":"terr","type":"root","gloss":"earth","lang":"la"}
+{"form":"test","type":"root","gloss":"witness","lang":"la"}
+{"form":"text","type":"root","gloss":"to weave","lang":"la"}
+{"form":"therm","type":"root","gloss":"heat","lang":"grc"}
+{"form":"tort","type":"root","gloss":"to twist","lang":"la"}
+{"form":"tract","type":"root","gloss":"to pull","lang":"la"}
+{"form":"trib","type":"root","gloss":"to give","lang":"la"}
+{"form":"trud","type":"root","gloss":"to push","lang":"la"}
+{"form":"turb","type":"root","gloss":"to disturb","lang":"la"}
+{"form":"umbr","type":"root","gloss":"shadow","lang":"la"}
+{"form":"und","type":"root","gloss":"wave, flow","lang":"la"}
+{"form":"uni","type":"root","gloss":"one","lang":"la"}
+{"form":"urb","type":"root","gloss":"city","lang":"la"}
+{"form":"vac","type":"root","gloss":"empty","lang":"la"}
+{"form":"vad","type":"root","gloss":"to go","lang":"la"}
+{"form":"val","type":"root","gloss":"strong, worth","lang":"la"}
+{"form":"ven","type":"root","gloss":"to come","lang":"la"}
+{"form":"ver","type":"root","gloss":"true","lang":"la"}
+{"form":"verb","type":"root","gloss":"word","lang":"la"}
+{"form":"vert","type":"root","gloss":"to turn","lang":"la"}
+{"form":"vest","type":"root","gloss":"clothing","lang":"la"}
+{"form":"via","type":"root","gloss":"way, road","lang":"la"}
+{"form":"vict","type":"root","gloss":"to conquer","lang":"la"}
+{"form":"vid","type":"root","gloss":"to see","lang":"la"}
+{"form":"viv","type":"root","gloss":"to live","lang":"la"}
+{"form":"voc","type":"root","gloss":"to call, voice","lang":"la"}
+{"form":"vol","type":"root","gloss":"wish, will","lang":"la"}
+{"form":"volv","type":"root","gloss":"to roll, turn","lang":"la"}
+{"form":"vor","type":"root","gloss":"to eat","lang":"la"}
+{"form":"duct","type":"root","gloss":"to lead","lang":"la"}
+{"form":"miss","type":"root","gloss":"to send","lang":"la"}
+{"form":"spect","type":"root","gloss":"to look","lang":"la"}
+{"form":"script","type":"root","gloss":"to write","lang":"la"}
+{"form":"vis","type":"root","gloss":"to see","lang":"la"}
+{"form":"vers","type":"root","gloss":"to turn","lang":"la"}
+{"form":"vent","type":"root","gloss":"to come","lang":"la"}
+{"form":"clus","type":"root","gloss":"closed","lang":"la"}
+{"form":"gress","type":"root","gloss":"to step, go","lang":"la"}
+{"form":"rect","type":"root","gloss":"straight, ruled","lang":"la"}
+{"form":"sent","type":"root","gloss":"to feel","lang":"la"}
+{"form":"puls","type":"root","gloss":"to drive, push","lang":"la"}
+{"form":"hydro","type":"root","gloss":"water","lang":"grc"}
+{"form":"micro","type":"root","gloss":"small","lang":"grc"}
+{"form":"macro","type":"root","gloss":"large","lang":"grc"}
+{"form":"poly","type":"root","gloss":"many","lang":"grc"}
+{"form":"mono","type":"root","gloss":"one","lang":"grc"}
+{"form":"auto","type":"root","gloss":"self","lang":"grc"}
+{"form":"pseudo","type":"root","gloss":"false","lang":"grc"}
+{"form":"dem","type":"root","gloss":"people","lang":"grc"}
+{"form":"morph","type":"root","gloss":"form, shape","lang":"grc"}
+{"form":"psych","type":"root","gloss":"mind, soul","lang":"grc"}
+{"form":"phil","type":"root","gloss":"love","lang":"grc"}
+{"form":"phob","type":"root","gloss":"fear","lang":"grc"}
+{"form":"anthrop","type":"root","gloss":"human","lang":"grc"}
+{"form":"arch","type":"root","gloss":"chief, rule","lang":"grc"}
+{"form":"cycl","type":"root","gloss":"circle, wheel","lang":"grc"}
+{"form":"neur","type":"root","gloss":"nerve","lang":"grc"}
+{"form":"-phone","type":"suffix","gloss":"sound, voice","lang":"grc"}

@@ -45,6 +45,16 @@
             <div style="font-size:20px;font-weight:700;color:#111827;">
               {{ .Word }}<span style="font-weight:400;font-size:15px;color:#6b7280;">&nbsp;&nbsp;{{ .IPA }}</span>
             </div>
+            {{ if .Phonics }}
+            <div style="margin-top:10px;font-size:15px;line-height:1.6;color:#374151;">
+              <span style="color:#9ca3af;">Phonics</span>&nbsp;&nbsp;{{ .Phonics }}
+            </div>
+            {{ end }}
+            {{ if .Parts }}
+            <div style="margin-top:4px;font-size:15px;line-height:1.6;color:#374151;">
+              <span style="color:#9ca3af;">Parts</span>&nbsp;&nbsp;{{ .Parts }}
+            </div>
+            {{ end }}
             <div style="margin-top:10px;font-size:15px;line-height:1.6;color:#374151;">
               <span style="color:#9ca3af;">ELI5</span>&nbsp;&nbsp;{{ .ELI5 }}
             </div>

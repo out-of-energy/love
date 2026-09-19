@@ -44,23 +44,61 @@ func TestNilIsNotATerminal(t *testing.T) {
 
 func TestRecordKeepsTheAgreedShape(t *testing.T) {
 	var b strings.Builder
-	Record(&b, "evil", "/ˈiːvəl/", "Very, very bad.", "邪恶的", false)
+	Record(&b, Anchor{
+		Word:    "expose",
+		IPA:     "/ɪkˈspəʊz/",
+		Phonics: "ex·pose → /ɪk/ · /ˈspəʊz/",
+		Parts:   `ex- (out) · pos (put) · -e ⇒ "put out"`,
+		ELI5:    "To show something that was hidden.",
+	}, false)
 
-	want := "evil /ˈiːvəl/\n\nELI5: Very, very bad.\n\n中文：邪恶的\n"
+	want := "expose /ɪkˈspəʊz/\n" +
+		"Phonics: ex·pose → /ɪk/ · /ˈspəʊz/\n" +
+		"Parts: ex- (out) · pos (put) · -e ⇒ \"put out\"\n" +
+		"ELI5: To show something that was hidden.\n"
 	if b.String() != want {
 		t.Errorf("got %q, want %q", b.String(), want)
 	}
 }
 
+// A record that predates the form layer prints two lines rather than two empty
+// labels. Until `love --backfill` runs, that is the honest shape.
+func TestRecordOmitsAFormLayerItDoesNotHave(t *testing.T) {
+	var b strings.Builder
+	Record(&b, Anchor{Word: "evil", IPA: "/ˈiːvəl/", ELI5: "Very, very bad."}, false)
+
+	want := "evil /ˈiːvəl/\nELI5: Very, very bad.\n"
+	if b.String() != want {
+		t.Errorf("got %q, want %q", b.String(), want)
+	}
+}
+
+// The terminal is where a word is recalled, so the gloss stays out of it. It is
+// still stored, and the daily email still prints it.
+func TestRecordNeverPrintsTheChineseGloss(t *testing.T) {
+	var b strings.Builder
+	Record(&b, Anchor{Word: "sign", IPA: "/saɪn/", ELI5: "A sign."}, false)
+
+	if strings.Contains(b.String(), "中文") {
+		t.Errorf("the terminal block must not carry the gloss: %q", b.String())
+	}
+}
+
 func TestRecordWithColorAddsOnlyBoldHead(t *testing.T) {
 	var b strings.Builder
-	Record(&b, "sign", "/saɪn/", "A sign.", "标志", true)
+	Record(&b, Anchor{
+		Word:    "sign",
+		IPA:     "/saɪn/",
+		Phonics: "sign → /saɪn/",
+		Parts:   "no clear prefix or suffix",
+		ELI5:    "A sign.",
+	}, true)
 
 	out := b.String()
-	if !strings.HasPrefix(out, "\x1b[1msign /saɪn/\x1b[0m\n\n") {
+	if !strings.HasPrefix(out, "\x1b[1msign /saɪn/\x1b[0m\nPhonics: ") {
 		t.Errorf("head should be bold and reset: %q", out)
 	}
-	if !strings.Contains(out, "\n\nELI5: A sign.\n\n中文：标志\n") {
+	if strings.Contains(strings.TrimPrefix(out, "\x1b[1msign /saɪn/\x1b[0m\n"), "\x1b[") {
 		t.Errorf("body should be plain and uncolored: %q", out)
 	}
 }
@@ -69,7 +107,13 @@ func TestRecordWithColorAddsOnlyBoldHead(t *testing.T) {
 // exactly the same path.
 func TestRecordRendersAPhrase(t *testing.T) {
 	var b strings.Builder
-	Record(&b, "ice cream", "/ˌaɪs ˈkriːm/", "Cold sweet food.", "冰淇淋", false)
+	Record(&b, Anchor{
+		Word:    "ice cream",
+		IPA:     "/ˌaɪs ˈkriːm/",
+		Phonics: "ice·cream → /ˌaɪs/ · /ˈkriːm/",
+		Parts:   "ice (frozen water) · cream (rich milk) ⇒ \"frozen sweet food\"",
+		ELI5:    "Cold sweet food.",
+	}, false)
 
 	if !strings.Contains(b.String(), "ice cream /ˌaɪs ˈkriːm/") {
 		t.Errorf("phrase was mangled: %q", b.String())

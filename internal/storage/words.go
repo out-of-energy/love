@@ -24,19 +24,51 @@ func Normalize(s string) string {
 // rather than recomputing it means a future change to Normalize cannot
 // re-partition existing data behind the user's back.
 type Word struct {
-	ID         string    `json:"id"`
-	Word       string    `json:"word"`
-	Normalized string    `json:"normalized"`
-	IPA        string    `json:"ipa"`
-	ELI5       string    `json:"eli5"`
-	Chinese    string    `json:"chinese"`
-	Source     string    `json:"source"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string `json:"id"`
+	Word       string `json:"word"`
+	Normalized string `json:"normalized"`
+	IPA        string `json:"ipa"`
+
+	// Phonics and Parts are the form layer: how the word is sounded out, and
+	// how it is built from a prefix, a root and a suffix. They sit beside the
+	// anchor rather than in generated.jsonl because they answer the same
+	// question — what is this word? — and because a clue that changed between
+	// reviews would stop being a clue. Both carry omitempty so a record that
+	// has not been backfilled yet keeps its original bytes on a rewrite.
+	Phonics string `json:"phonics,omitempty"`
+	Parts   string `json:"parts,omitempty"`
+
+	// PartsSource records where the segmentation came from: "model" when the
+	// model worked it out alone, "morphology" when the morphology data
+	// supplied it and the model agreed, "morphology-forced" when the data had
+	// to override the model. It is what makes a later rebuild honest: a word
+	// whose split came from a model is exactly the one worth revisiting when
+	// the data improves.
+	PartsSource string `json:"parts_source,omitempty"`
+
+	ELI5      string    `json:"eli5"`
+	Chinese   string    `json:"chinese"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // NeedsMigration reports whether w predates the current schema.
+//
+// The form layer is deliberately NOT part of this test. Migration is an
+// offline rewrite, and it cannot invent a phonics split or an etymology; a
+// record that lacks only those fields is complete enough to serve, and is
+// filled later by --backfill or by a daily run (see NeedsForm).
 func (w Word) NeedsMigration() bool {
 	return w.ID == "" || w.Normalized == "" || w.Source == "" || w.CreatedAt.IsZero()
+}
+
+// NeedsForm reports whether w is missing part of the form layer.
+//
+// Such a record is served as it stands. Lookups never fill it in, because a
+// cache hit is promised to be offline and free; the fill happens in the paths
+// that already spend API calls.
+func (w Word) NeedsForm() bool {
+	return w.Phonics == "" || w.Parts == ""
 }
 
 // Find returns the word whose normalized form matches key.
@@ -163,6 +195,64 @@ func (s *WordStore) Add(w Word, now time.Time) (AddResult, error) {
 		return nil
 	})
 	return result, err
+}
+
+// Form is the upgrade SetForm writes: the two lines a lookup could not supply,
+// plus where the segmentation came from.
+type Form struct {
+	Phonics string
+	Parts   string
+	Source  string
+}
+
+// SetForm fills the form layer of an existing record, in place.
+//
+// It takes the fields rather than a whole Word so that a caller cannot clobber a
+// record it did not mean to touch: the anchor is a user asset, and the only
+// thing an upgrade is allowed to change about it is what was missing.
+//
+// The read-modify-write happens under the same lock Add uses, so a lookup
+// running in another terminal cannot lose the update, and the word keeps its
+// position in the file.
+func (s *WordStore) SetForm(key string, form Form) (Word, error) {
+	key = Normalize(key)
+
+	var updated Word
+	err := withLock(s.path, 30*time.Second, func() error {
+		words, warnings, err := s.Load()
+		if err != nil {
+			return err
+		}
+		if len(warnings) > 0 {
+			// Rewriting would discard the damaged lines, and those lines may be
+			// the only copy of a word. Refuse, exactly as Migrate does.
+			return fmt.Errorf("%s has %d damaged line(s); refusing to rewrite it", s.path, len(warnings))
+		}
+		for i := range words {
+			if words[i].Normalized != key {
+				continue
+			}
+			// An empty field means "leave it alone". That is what lets a
+			// re-check of the segmentation rewrite the parts without
+			// regenerating a phonics line that was already fine.
+			if form.Phonics != "" {
+				words[i].Phonics = form.Phonics
+			}
+			if form.Parts != "" {
+				words[i].Parts = form.Parts
+			}
+			if form.Source != "" {
+				words[i].PartsSource = form.Source
+			}
+			updated = words[i]
+			return s.Rewrite(words)
+		}
+		return fmt.Errorf("no entry for %q", key)
+	})
+	if err != nil {
+		return Word{}, err
+	}
+	return updated, nil
 }
 
 // Rewrite replaces the whole file atomically, preserving order.

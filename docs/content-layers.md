@@ -29,6 +29,8 @@
 | 字段 | 来源 | 是否会被 AI 重写 |
 |---|---|---|
 | `ipa` | `words.jsonl` | ❌ 永不变 |
+| `phonics` | `words.jsonl` | ❌ 永不变 |
+| `parts` | `words.jsonl` | ❌ 永不变 |
 | `eli5` | `words.jsonl` | ❌ 永不变 |
 | `chinese` | `words.jsonl` | ❌ 永不变 |
 
@@ -37,6 +39,37 @@
 同一个词每次复习看到完全相同的 ELI5 和音标——记忆依赖**稳定的检索线索**。如果每次换个说法，复习就变成了"读一段新文字"，而不是"回忆一个已知的东西"。
 
 这也是为什么锚点层放在 `words.jsonl`（用户资产）而不是 `generated.jsonl`（可重建缓存）。
+
+### 形式层为什么也在锚点里
+
+`phonics`（自然拼读：音节切分 + 每块读音）和 `parts`（前缀 / 词根 / 后缀 + 每部分原义）
+回答的是同一个问题——**这个词长什么样**——而不是"怎么用"。它们和 `ipa` 一起构成"看一眼
+就能读出来、看出来"的那部分，所以放在锚点层，和 `ipa` 一样永不重新生成。
+
+放进 `generated.jsonl` 就不一样了：它们会随扩展层一起被重建，同一个词今天的切分和昨天
+的不同，就不再是线索，而是一段新内容。
+
+这两行是**后来追加的字段**：早期记录没有它们，仍照常读出与显示——少打印两行，而不是打印
+两个空标签。补齐只走已经要花请求的路径：`love --backfill`，或 `--daily` 顺手补。
+**查词命中绝不联网**，这是"命中零成本"承诺的底线。
+
+### `parts` 不由模型决定
+
+`parts` 是这四行里唯一**不该让模型自己编**的一行。你让模型拆词，它每次都会给出一个
+听起来合理的答案——它把 `symlink` 拆成 `sym- (together)`，把 `fundamentals` 拆成
+`-amental`，两句话都很顺，两句话都是错的。
+
+所以切分的**事实**来自数据：`~/.ewh/lexicon/`（MorphyNet，Wiktionary 的词素切分，
+CC BY-SA 3.0，由 `scripts/build_morphology.py` 生成，默认不装也能跑）。模型只保留它
+擅长的两件事——给自由词根写短释义、把各部分拼成字面意思——并且只能从**已记录的候选**
+里挑一个；跑偏了就被数据改写，`parts_source` 会记下这次改写。
+
+数据也会错（维基把 `curious` 追到了元素 `curium`），所以还有两条出路：模型可以回答
+`no clear prefix or suffix` 否决全部候选，以及 `internal/lexicon/overrides.jsonl`
+里的人工更正——它优先级最高，且 `--recheck` 不会推翻它。
+
+这套约束的效果由 `internal/lexicon/testdata/parts_gold.jsonl`（56 个人工核对过的
+常用词）衡量：`go test ./internal/lexicon -run TestGoldSet`。
 
 ---
 
@@ -102,6 +135,11 @@ v0.3 §14 的 AI 契约只有 `example` 和 `scene`，没有对话。而"活用"
 │                                     │
 │  maintain  /meɪnˈteɪn/              │
 │                                     │
+│  Phonics: main·tain → /meɪn/ · /ˈteɪn/ │
+│                                     │
+│  Parts: main- (hand) · tain (hold)  │
+│         ⇒ "to hold by hand"         │
+│                                     │
 │  ELI5: To keep something working    │
 │        well.                        │
 │                                     │
@@ -149,8 +187,9 @@ $ love --review
 
   ── 第一部分 ──────────────────
   maintain  /meɪnˈteɪn/
+  Phonics: main·tain → /meɪn/ · /ˈteɪn/
+  Parts: main- (hand) · tain (hold) ⇒ "to hold by hand"
   ELI5: To keep something working well.
-  中文：维护，保持
 
   ── 第二部分 ──────────────────  [按 e 展开]
   · I maintain my bicycle every month.
@@ -162,6 +201,8 @@ $ love --review
 ```
 
 - **揭示时先只给第一部分**——这是回忆的答案，给多了就不是回忆了
+- **中文含义不在终端显示**：终端就是回忆现场，中文是答案本身；它留在词库里，
+  并且继续出现在邮件里（手机上是泛读，不是回忆）
 - **第二部分按 `e` 展开**，默认折叠：复习要快，扩展是可选动作
 - 评分后再看第二部分也可以，但默认放在评分前、按需展开更自然
 
@@ -171,9 +212,13 @@ $ love --review
 
 | 数据 | 文件 | 是否可重建 |
 |---|---|---|
-| 锚点层（ipa / eli5 / chinese） | `words.jsonl` | ❌ 用户资产，丢失需重新查询 |
+| 锚点层（ipa / phonics / parts / eli5 / chinese） | `words.jsonl` | ❌ 用户资产，丢失需重新查询 |
 | 扩展层（meaning / examples / scene / dialogue） | `generated.jsonl` | ✅ AI 可重新生成 |
 | 复习事件 | `reviews.jsonl` | ❌ 唯一历史 |
 | 派生状态 | `memory.json` | ✅ 可从事件重放 |
 
 这个划分的意义：**锚点层是资产，扩展层是缓存**。删掉 `generated.jsonl` 只损失一次 API 花费，不影响记忆历史；而 `eli5` 必须跟着词条一起被备份。
+
+形式层（`phonics` / `parts`）跟着锚点一起备份，理由和 `eli5` 一样：它是检索线索的一部分。
+唯一的差别是它可以被**补**——老记录缺这两行时，`love --backfill` 花一次请求就能补上，
+而 `eli5` 一旦丢失，即使重新生成也不再是原来那句话了。

@@ -26,9 +26,15 @@ var reviewHTML string
 var reviewTemplate = template.Must(template.New("review").Parse(reviewHTML))
 
 // Word is one entry in the digest.
+//
+// The Chinese gloss is part of this struct even though the terminal never
+// prints it: the email is read on a phone, in a queue or on a train, and there
+// the gloss is help rather than a spoiler.
 type Word struct {
 	Word    string
 	IPA     string
+	Phonics string
+	Parts   string
 	ELI5    string
 	Chinese string
 
@@ -98,6 +104,15 @@ func RenderText(d Digest) (string, error) {
 		b.WriteString("\n\n")
 
 		fmt.Fprintf(&b, "%s  %s\n", w.Word, w.IPA)
+		// The form lines are printed only when the record has them: an
+		// upgraded file is honest about what it holds, and love --backfill is
+		// what fills the rest.
+		if w.Phonics != "" {
+			fmt.Fprintf(&b, "Phonics: %s\n", w.Phonics)
+		}
+		if w.Parts != "" {
+			fmt.Fprintf(&b, "Parts: %s\n", w.Parts)
+		}
 		fmt.Fprintf(&b, "ELI5: %s\n", w.ELI5)
 		fmt.Fprintf(&b, "中文：%s\n", w.Chinese)
 

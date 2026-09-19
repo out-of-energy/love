@@ -11,6 +11,9 @@
 > 本文中仍然有效的部分：查词流程、词库格式与去重、退出码、测试方法。
 > **已失效的部分**：§8 里程碑与 §11 之后的 M2/M3 计划（`--json`、`show`、`list`、`stats`、
 > `path`、`config`、`--refresh`、`--no-cache`、`import`、`rm`、`export` 这一串）。
+> 另外 §4.3 的输出格式与 §4.4 的词库字段也已被后续版本取代：v0.4 起输出是四行
+> （音标 / Phonics / Parts / ELI5，终端不再显示中文），词条是十个字段
+> （多了 `phonics` 和 `parts`，见 `docs/content-layers.md`）。
 > 命令名也从 `ewh` 定为 `love`。历史保留，便于回看当时的取舍。
 
 ---
@@ -285,8 +288,8 @@ MVP 阶段的实现**已包含**：规范化（含短语）、JSONL 容错读取
 | Go 模块与四个包（`main` / `cache` / `dict` / `render`） | ✅ 完成 |
 | 单元测试（cache / dict / render / main） | ✅ 全绿，`-race` 通过 |
 | 覆盖率 | main 65%、cache 75%、dict 87%、render 50% |
-| 端到端（本地 mock API 驱动真实二进制，19 项断言） | ✅ 全部通过 |
-| 二进制安装 | ✅ `/opt/homebrew/bin/love`（当时 v0.1.0，现已到 v0.3.0） |
+| 端到端（本地 mock API 驱动真实二进制，80 项断言） | ✅ 全部通过 |
+| 二进制安装 | ✅ `/opt/homebrew/bin/love`（当时 v0.1.0，现已到 v0.4.0） |
 | 旧 skill 词库迁移 | ✅ 8 个词 → `~/.ewh/words.jsonl`，去重后 8 条 |
 | **真实 DeepSeek API 验证** | ✅ 完成（2026-09-13） |
 
@@ -303,6 +306,9 @@ ELI5: You want to know about things. You ask lots of questions.
 $ love CURIOUS            # 再次：0.009s，无网络请求
 （同样输出）
 ```
+
+> 上面是 2026-09-13 的原始记录。v0.4 起同样的查询会打印 `Phonics:` 与 `Parts:` 两行，
+> 并且终端不再打印中文（邮件仍然打印）。历史记录保持原样，不再回改。
 
 直接探测 `POST /v1/chat/completions` 的状态码：
 

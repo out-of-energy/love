@@ -35,7 +35,7 @@ import (
 
 // version is a var so release builds can override it with
 // -ldflags "-X main.version=...".
-var version = "0.4.0"
+var version = "0.4.2"
 
 // Documented exit codes. Scripts rely on these, so they are part of the
 // interface rather than an implementation detail.

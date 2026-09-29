@@ -34,7 +34,7 @@ func TestParseSoundChunksMovesTheSlashes(t *testing.T) {
 	}
 }
 
-// The case that started all of this: "profile" is /ˈpɹəʊ.faɪl/, and adding -ing
+// The case that started all of this: "profile" is /ˈprəʊ.faɪl/, and adding -ing
 // hands the /l/ to the next syllable as its onset. Splitting by letters gives
 // /faɪl/ · /ɪŋ/, which teaches that "fil" says /faɪl/ — it does not.
 func TestTheLGoesToTheNextSyllable(t *testing.T) {
@@ -42,17 +42,17 @@ func TestTheLGoesToTheNextSyllable(t *testing.T) {
 	if !ok {
 		t.Fatal("profiling should be in the index")
 	}
-	if got := strings.Join(p.SoundChunks, " · "); got != "/ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+	if got := strings.Join(p.SoundChunks, " · "); got != "/ˈprəʊ/ · /faɪ/ · /lɪŋ/" {
 		t.Errorf("sound chunks = %q", got)
 	}
-	if p.IPA != "/ˈpɹəʊfaɪlɪŋ/" {
+	if p.IPA != "/ˈprəʊfaɪlɪŋ/" {
 		t.Errorf("ipa = %q", p.IPA)
 	}
 }
 
 func TestPhrasePairsTheSpellingWithTheSounds(t *testing.T) {
 	p, _ := phonicsFixture(t).Pronounce("profiling")
-	want := "pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/"
+	want := "pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/"
 	if got := p.Phrase(); got != want {
 		t.Errorf("Phrase = %q, want %q", got, want)
 	}
@@ -62,7 +62,7 @@ func TestPhrasePairsTheSpellingWithTheSounds(t *testing.T) {
 // guess: this package's whole argument is that invented boundaries mislead.
 func TestPhraseWithoutSpellingChunksKeepsTheWordWhole(t *testing.T) {
 	p, _ := phonicsFixture(t).Pronounce("winter")
-	if got := p.Phrase(); got != "winter → /ˈwɪn/ · /tɐ/" {
+	if got := p.Phrase(); got != "winter → /ˈwɪn/ · /tə/" {
 		t.Errorf("Phrase = %q", got)
 	}
 }
@@ -142,5 +142,30 @@ func TestPhonicsGoldSet(t *testing.T) {
 	}
 	if rate < 0.95 {
 		t.Errorf("accuracy %.0f%% is below the 95%% floor", rate*100)
+	}
+}
+
+// The index keeps the strict IPA that the dictionary wrote; what a learner reads
+// is the convention their dictionary prints. The two must not be confused:
+// ipa-dict's ɹ is the English approximant (IPA's plain r is a trill), ɛ is the
+// open e, ɡ is script g, and ɐ is the vowel at the end of "winter".
+func TestStrictSymbolsArePrintedInLearnerStyle(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "phonics.tsv"),
+		"profilɛ\t/ˈpɹəʊfaɪlɡɛ/\t/ˈpɹəʊ|faɪl|ɡɛ/\t\tuk\n"+
+			"winter\t/ˈwɪntɐ/\t/ˈwɪn|tɐ/\twin·ter\tuk+moby\n")
+	lex := Open(dir)
+
+	winter, ok := lex.Pronounce("winter")
+	if !ok {
+		t.Fatal("winter should be found")
+	}
+	if winter.IPA != "/ˈwɪntə/" || strings.Join(winter.SoundChunks, " · ") != "/ˈwɪn/ · /tə/" {
+		t.Errorf("winter = %q %v", winter.IPA, winter.SoundChunks)
+	}
+
+	r, _ := lex.Pronounce("profilɛ")
+	if r.IPA != "/ˈprəʊfaɪlge/" || strings.Join(r.SoundChunks, " · ") != "/ˈprəʊ/ · /faɪl/ · /ge/" {
+		t.Errorf("learner style = %q %v", r.IPA, r.SoundChunks)
 	}
 }

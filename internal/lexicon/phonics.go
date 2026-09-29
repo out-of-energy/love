@@ -21,6 +21,28 @@ import (
 	"strings"
 )
 
+// learnerStyle maps the strict IPA symbols to the ones learner dictionaries
+// print.
+//
+// ipa-dict is a phonetics resource and uses the proper letters: ɹ for the
+// English approximant (IPA's plain r is a trill, which English does not have),
+// ɛ for the open e, ɡ for script g, and ɐ for the vowel at the end of "winter".
+// Cambridge and Oxford print r, e, g and ə instead, because a learner reading a
+// dictionary wants to recognise the word, not to transcribe it.
+//
+// The substitution happens here, on the way out of the data layer, so the index
+// on disk keeps what the dictionary actually said and the choice of convention
+// is one line rather than a property of the data. It also has to be here rather
+// than at print time: the writer and the re-check compare stored lines against
+// this layer's answer, and a normalisation applied only when printing would make
+// every stored word look stale on every run.
+var learnerStyle = strings.NewReplacer(
+	"ɹ", "r",
+	"ɛ", "e",
+	"ɡ", "g",
+	"ɐ", "ə",
+)
+
 // Pronunciation is the sound layer's answer for one word.
 type Pronunciation struct {
 	// Word is the headword the line is built around.
@@ -76,8 +98,8 @@ func (l *Lexicon) Pronounce(word string) (Pronunciation, bool) {
 	}
 	p := Pronunciation{
 		Word:           fields[0],
-		IPA:            fields[1],
-		SoundChunks:    parseSoundChunks(fields[2]),
+		IPA:            learnerStyle.Replace(fields[1]),
+		SoundChunks:    inLearnerStyle(parseSoundChunks(fields[2])),
 		SpellingChunks: parseSpellingChunks(fields[3]),
 		Source:         fields[4],
 	}
@@ -117,6 +139,15 @@ func parseSoundChunks(field string) []string {
 			continue
 		}
 		out = append(out, "/"+chunk+"/")
+	}
+	return out
+}
+
+// inLearnerStyle rewrites a list of chunks through the same substitution.
+func inLearnerStyle(chunks []string) []string {
+	out := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, learnerStyle.Replace(chunk))
 	}
 	return out
 }

@@ -811,10 +811,10 @@ func TestTheDictionaryFixesTheSoundLineWithoutARequest(t *testing.T) {
 		t.Fatalf("got %d records", len(words))
 	}
 	w := words[0]
-	if w.Phonics != "pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+	if w.Phonics != "pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/" {
 		t.Errorf("the sound line was not repaired: %q", w.Phonics)
 	}
-	if w.IPA != "/ˈpɹəʊfaɪlɪŋ/" {
+	if w.IPA != "/ˈprəʊfaɪlɪŋ/" {
 		t.Errorf("the ipa should come from the dictionary too: %q", w.IPA)
 	}
 	if w.PhonicsSource != "dictionary" {
@@ -833,7 +833,7 @@ func TestTheDictionaryFixesTheSoundLineWithoutARequest(t *testing.T) {
 func TestTheSoundRepairIsIdempotent(t *testing.T) {
 	paths := storage.PathsIn(t.TempDir())
 	writeWords(t, paths.Words, `{"id":"p1","word":"profiling","normalized":"profiling",`+
-		`"ipa":"/ˈpɹəʊfaɪlɪŋ/","phonics":"pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/",`+
+		`"ipa":"/ˈprəʊfaɪlɪŋ/","phonics":"pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/",`+
 		`"phonics_source":"dictionary","parts":"x","parts_source":"morphology",`+
 		`"eli5":"e","chinese":"c","source":"cli","created_at":"2026-09-01T00:00:00Z"}`+"\n")
 	writePhonics(t, filepath.Dir(paths.Words), profilingRow)
@@ -870,13 +870,13 @@ func TestALookupPrefersTheDictionaryPronunciation(t *testing.T) {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Phonics: pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/") {
+	if !strings.Contains(out, "Phonics: pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/") {
 		t.Errorf("the dictionary split should be printed:\n%s", out)
 	}
 	if strings.Contains(out, "/faɪl/") {
 		t.Errorf("the model's letter split reached the terminal:\n%s", out)
 	}
-	if !strings.Contains(out, "profiling /ˈpɹəʊfaɪlɪŋ/") {
+	if !strings.Contains(out, "profiling /ˈprəʊfaɪlɪŋ/") {
 		t.Errorf("the ipa should be the dictionary's:\n%s", out)
 	}
 }

@@ -131,15 +131,15 @@ func TestEntryValidate(t *testing.T) {
 // hyphenation data would have to print the word whole.
 func TestApplySoundKeepsTheSpellingSideWhenItFits(t *testing.T) {
 	opts := Options{Sound: &Sound{
-		IPA:         "/ˈpɹəʊfaɪlɪŋ/",
-		SoundChunks: []string{"/ˈpɹəʊ/", "/faɪ/", "/lɪŋ/"},
+		IPA:         "/ˈprəʊfaɪlɪŋ/",
+		SoundChunks: []string{"/ˈprəʊ/", "/faɪ/", "/lɪŋ/"},
 	}}
 
 	ipa, line, source := opts.ApplySound("profiling", "/old/", "pro·fil·ing → /ˈprəʊ/ · /faɪl/ · /ɪŋ/")
-	if ipa != "/ˈpɹəʊfaɪlɪŋ/" {
+	if ipa != "/ˈprəʊfaɪlɪŋ/" {
 		t.Errorf("ipa = %q", ipa)
 	}
-	if line != "pro·fil·ing → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+	if line != "pro·fil·ing → /ˈprəʊ/ · /faɪ/ · /lɪŋ/" {
 		t.Errorf("line = %q", line)
 	}
 	if source != "dictionary" {
@@ -151,10 +151,10 @@ func TestApplySoundKeepsTheSpellingSideWhenItFits(t *testing.T) {
 // mismatched left side is dropped rather than carried along.
 func TestApplySoundDropsASpellingSideThatDoesNotFit(t *testing.T) {
 	opts := Options{Sound: &Sound{
-		IPA:         "/ˈpɹəʊfaɪlɪŋ/",
-		SoundChunks: []string{"/ˈpɹəʊ/", "/faɪ/", "/lɪŋ/"},
+		IPA:         "/ˈprəʊfaɪlɪŋ/",
+		SoundChunks: []string{"/ˈprəʊ/", "/faɪ/", "/lɪŋ/"},
 	}}
-	if _, line, _ := opts.ApplySound("profiling", "", "profile → /ˈprəʊ/ · /faɪl/"); line != "profiling → /ˈpɹəʊ/ · /faɪ/ · /lɪŋ/" {
+	if _, line, _ := opts.ApplySound("profiling", "", "profile → /ˈprəʊ/ · /faɪl/"); line != "profiling → /ˈprəʊ/ · /faɪ/ · /lɪŋ/" {
 		t.Errorf("line = %q", line)
 	}
 }

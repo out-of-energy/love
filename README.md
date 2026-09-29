@@ -447,10 +447,13 @@ Two consequences worth knowing:
   `love --backfill` re-checks every word's sound line every time it runs, with no
   API key and no spend. That is what fixed a whole existing dictionary in one
   pass.
-- **The transcription will change.** Dictionary IPA replaces the model's, so a
-  stored `/ˈprəʊfaɪlɪŋ/` becomes `/ˈpɹəʊfaɪlɪŋ/` — `ɹ` rather than `r`, and the
-  British vowel qualities. The data is the authority; if the model's looser
-  transcription is ever wanted back, it is one line in the print function.
+- **The transcription will change.** Dictionary IPA replaces the model's, so the
+  British vowel qualities arrive with it. What you read is still the learner
+  dictionary convention — `r`, `e`, `g`, `ə` — because ipa-dict's strict letters
+  (`ɹ` for the approximant, `ɛ`, `ɡ`, `ɐ`) are correct but unfamiliar, and a
+  reader wants to recognise the word rather than transcribe it. The substitution
+  happens on the way out of the data layer, so the index keeps exactly what the
+  dictionary said and the choice of convention stays one line.
 
 ### Measuring it
 

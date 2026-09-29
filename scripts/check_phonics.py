@@ -18,6 +18,18 @@ import pathlib
 import sys
 
 
+# The index keeps the strict IPA the dictionary wrote; the tool prints, and the
+# answer key records, the convention learner dictionaries use. The comparison has
+# to happen on one side of that line, so the substitution is applied here too.
+LEARNER_STYLE = {"ɹ": "r", "ɛ": "e", "ɡ": "g", "ɐ": "ə"}
+
+
+def in_learner_style(text):
+    for strict, familiar in LEARNER_STYLE.items():
+        text = text.replace(strict, familiar)
+    return text
+
+
 def load_index(path):
     table = {}
     with open(path, encoding="utf-8") as f:
@@ -66,7 +78,7 @@ def main():
         # Compare the chunks themselves, so the answer key may write them either
         # with one pair of slashes per chunk (what the tool prints) or with a
         # single pair around the whole transcription (what the index stores).
-        got = [c.strip("/") for c in row[2].split("|")]
+        got = [in_learner_style(c.strip("/")) for c in row[2].split("|")]
         expected = [c.strip("/") for c in want.split("|")]
         want = "|".join(expected)
         if got == expected:

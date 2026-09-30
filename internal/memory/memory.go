@@ -36,10 +36,17 @@ func (r Rating) Valid() bool { return r >= Again && r <= Easy }
 
 // Config holds every tunable number in the engine.
 //
-// The defaults are the ones validated by the 365-day simulation in the v0.3
-// specification. They are deliberately not obvious: an earlier five-box
+// The intervals are the ones the 365-day simulation in the v0.3 specification
+// validated, and they are deliberately not obvious: an earlier five-box
 // schedule ending at 30 days capped the whole collection at roughly 240 words
 // and stalled new-word intake to almost nothing within four months.
+//
+// The budget is no longer the simulated one. The specification sized it for a
+// throughput target ("a year must reach 500 words"), and the learner who has to
+// sit through those sessions overruled the target on 2026-09-29: two words a
+// day, of which at least one is new. That is a deliberate trade of vocabulary
+// growth for the sessions actually being opened, and the tests below record
+// what it costs rather than pretending the old figures still hold.
 type Config struct {
 	// Intervals is the number of days spent in each box. Box N uses
 	// Intervals[N-1], so the slice length is the number of boxes.
@@ -50,14 +57,22 @@ type Config struct {
 	// MaxNew is a hard ceiling on new words per day, applied after reviews
 	// have taken their share.
 	MaxNew int
+	// MinNew is the number of slots reviews may not take: the day's floor of
+	// new words. Without it, capacity driven by reviews alone starves intake
+	// — at a capacity of two, any backlog at all freezes the word list, which
+	// is the opposite of what a small budget is for. It binds only while the
+	// word list still has unlearned words to offer.
+	MinNew int
 }
 
-// DefaultConfig returns the v0.3 validated parameters.
+// DefaultConfig returns the intervals the v0.3 simulation validated, with the
+// budget the learner asked for in place of the one the simulation assumed.
 func DefaultConfig() Config {
 	return Config{
 		Intervals: []int{1, 3, 7, 14, 30, 90, 180, 365},
-		Capacity:  16,
-		MaxNew:    4,
+		Capacity:  2,
+		MaxNew:    2,
+		MinNew:    1,
 	}
 }
 

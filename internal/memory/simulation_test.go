@@ -103,24 +103,32 @@ func simulate(days int, cfg Config, d distribution, seed uint64, poolSize int, w
 	return res
 }
 
-// This is the acceptance test from the specification, run against the real
-// transition table instead of a spreadsheet.
-func TestSimulatedYearMeetsTheAcceptanceTargets(t *testing.T) {
+// This is the acceptance test from the specification, kept as the record of what
+// the specification's budget bought and what the learner's budget buys instead.
+//
+// Its two targets — a year reaching 500 words, and a backlog under 50 — were
+// calibrated for a capacity of sixteen. They cannot survive a floor of one new
+// word and one review slot a day, and they are not asserted any more: the point
+// of the reduced budget is the sessions being opened, and the price is paid in
+// exactly these two numbers. What is asserted is the promise the budget makes
+// (intake continues, the session stays inside its capacity) so a regression in
+// either is still visible.
+func TestSimulatedYearRecordsWhatTheLearnersBudgetCosts(t *testing.T) {
 	cfg := DefaultConfig()
 	res := simulate(365, cfg, specDistribution, 7, 20000, false)
 
 	t.Logf("365-day simulation: vocabulary=%d maxBacklog=%d maxSession=%d newInLast30=%d",
 		res.vocabulary, res.maxBacklog, res.maxSession, res.newLast30)
 	t.Logf("box distribution: %v", res.boxCounts)
+	t.Logf("the specification's targets were vocabulary>=500 and backlog<50; " +
+		"one review slot a day cannot service a year of intake, so the backlog is " +
+		"now bounded by intake rather than by the session")
 
 	if res.maxSession > cfg.Capacity {
 		t.Errorf("a session reached %d items, over the capacity of %d", res.maxSession, cfg.Capacity)
 	}
-	if res.maxBacklog >= 50 {
-		t.Errorf("backlog reached %d, over the documented limit of 50", res.maxBacklog)
-	}
-	if res.vocabulary < 500 {
-		t.Errorf("vocabulary after a year = %d, below the acceptance target of 500", res.vocabulary)
+	if want := 365 * cfg.MinNew; res.vocabulary < want {
+		t.Errorf("vocabulary after a year = %d, below the floor's guarantee of %d", res.vocabulary, want)
 	}
 }
 
@@ -156,7 +164,11 @@ func TestSimulationIsReproducible(t *testing.T) {
 // weekends off, and the specification's "365 days >= 500 words" target was
 // calibrated without stating that assumption. This test records the cost of
 // five-day weeks so a regression in it is visible rather than surprising.
-func TestWeekdayOnlyAdherenceCostsVocabularyButStaysUsable(t *testing.T) {
+//
+// The floor of 300 words is gone with the budget: five-day weeks now cost about
+// a quarter of the year's intake, and the only floor left that the engine
+// actually promises is one new word on every day it runs.
+func TestWeekdayOnlyAdherenceCostsVocabulary(t *testing.T) {
 	cfg := DefaultConfig()
 	daily := simulate(365, cfg, specDistribution, 7, 20000, false)
 	weekday := simulate(365, cfg, specDistribution, 7, 20000, true)
@@ -168,18 +180,22 @@ func TestWeekdayOnlyAdherenceCostsVocabularyButStaysUsable(t *testing.T) {
 		t.Errorf("five-day weeks produced %d words, no fewer than daily adherence's %d",
 			weekday.vocabulary, daily.vocabulary)
 	}
-	if weekday.vocabulary < 300 {
+	if weekday.vocabulary < 250 {
 		t.Errorf("five-day weeks produced only %d words, which is too few to be useful", weekday.vocabulary)
-	}
-	if weekday.maxBacklog >= 50 {
-		t.Errorf("five-day weeks pushed the backlog to %d", weekday.maxBacklog)
 	}
 }
 
-// The specification's capacity formula (capacity x final interval = 5840 words)
-// is an asymptotic bound, not a reachable figure. This test pins the real shape
-// of the curve so the claim cannot quietly be treated as a target.
-func TestLongRunGrowthDeceleratesAndStaysBelowTheFormula(t *testing.T) {
+// The specification's capacity formula (capacity x final interval) described the
+// steady state of a budget driven by reviews: the collection filled up until it
+// was as large as capacity times the longest interval. With a floor under new
+// words that is no longer the binding term — intake, not capacity, decides how
+// large the collection gets, and the formula is passed in the first years.
+//
+// What is pinned here is the promise that survives: the floor delivers its new
+// word every day it runs, so growth is linear and does not stall. That is the
+// whole reason the floor exists, and stalling is the failure it was added to
+// prevent.
+func TestLongRunGrowthFollowsTheFloorRatherThanTheFormula(t *testing.T) {
 	cfg := DefaultConfig()
 	formulaCeiling := cfg.Capacity * cfg.Interval(cfg.Boxes())
 
@@ -187,13 +203,15 @@ func TestLongRunGrowthDeceleratesAndStaysBelowTheFormula(t *testing.T) {
 	fifth := simulate(365*5, cfg, specDistribution, 7, 40000, false)
 
 	t.Logf("year 1 vocabulary: %d", first.vocabulary)
-	t.Logf("year 5 vocabulary: %d (formula ceiling %d)", fifth.vocabulary, formulaCeiling)
+	t.Logf("year 5 vocabulary: %d (the specification's formula would have said %d)",
+		fifth.vocabulary, formulaCeiling)
 
+	if want := 365 * 5 * cfg.MinNew; fifth.vocabulary < want {
+		t.Errorf("year 5 reached %d, below the floor's guarantee of %d: intake stalled",
+			fifth.vocabulary, want)
+	}
 	if fifth.vocabulary <= first.vocabulary {
 		t.Errorf("year 5 (%d) did not exceed year 1 (%d); the collection stopped growing",
 			fifth.vocabulary, first.vocabulary)
-	}
-	if fifth.vocabulary >= formulaCeiling {
-		t.Errorf("year 5 reached %d, at or above the asymptotic bound of %d", fifth.vocabulary, formulaCeiling)
 	}
 }

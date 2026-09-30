@@ -18,10 +18,18 @@ func (p Plan) Total() int { return len(p.Review) + len(p.New) }
 
 // PlanDay decides what today's session contains.
 //
-// Reviews are chosen first and consume the budget; new words only get what is
-// left. This ordering is the whole point of the cognitive budget. A backlog
-// must never be answered by piling on more new material, and a heavy review day
-// must be allowed to reduce new-word intake to zero on its own.
+// Reviews are chosen first and consume the budget; new words get what is left.
+// This ordering is the whole point of the cognitive budget. A backlog must
+// never be answered by piling on more new material, and a heavy review day must
+// be allowed to reduce new-word intake on its own.
+//
+// The one exception is MinNew, the floor held back before reviews are allowed
+// to fill the day. Review-first alone is stable only while the budget is large
+// enough to review the backlog and still have room left: once capacity is the
+// size of a backlog, every slot goes to reviews forever and the word list never
+// grows again. The floor keeps intake alive on exactly those days, and it is
+// released when there is nothing left to introduce, so an exhausted list does
+// not leave a hole in the session.
 //
 // Both orderings are fixed, because the alternative is a scheduler whose
 // behaviour depends on Go's map iteration order:
@@ -57,16 +65,33 @@ func (c Config) PlanDay(now time.Time, states map[string]State, unlearned []stri
 		return dues[i].id < dues[j].id
 	})
 
+	// The floor can never exceed what is available to fill it, nor the day.
+	reserved := c.MinNew
+	if reserved > len(unlearned) {
+		reserved = len(unlearned)
+	}
+	if reserved > c.Capacity {
+		reserved = c.Capacity
+	}
+	reviewBudget := c.Capacity - reserved
+
 	plan := Plan{}
 	for _, d := range dues {
-		if len(plan.Review) >= c.Capacity {
+		if len(plan.Review) >= reviewBudget {
 			break
 		}
 		plan.Review = append(plan.Review, d.id)
 	}
 
+	// A ceiling below the floor cannot be honoured as written: the floor is the
+	// stronger promise, so it wins and the ceiling is read as raised to match.
+	ceiling := c.MaxNew
+	if ceiling < reserved {
+		ceiling = reserved
+	}
+
 	remaining := c.Capacity - len(plan.Review)
-	limit := c.MaxNew
+	limit := ceiling
 	if remaining < limit {
 		limit = remaining
 	}
